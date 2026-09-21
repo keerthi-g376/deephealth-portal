@@ -1,0 +1,24 @@
+# Render blueprint: New + > Blueprint > pick the GitHub repo containing this folder.
+services:
+  - type: web
+    name: deephealth-portal # becomes https://deephealth-portal.onrender.com (if the name is free)
+    runtime: node
+    plan: free
+    buildCommand: npm install --include=dev && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: 22
+      - key: PUBLIC_MODE
+        value: "true"
+      - key: SF_INSTANCE_URL
+        value: https://4c1753372963009-dev-ed.develop.my.salesforce.com
+      # Enter these two in the Render dashboard when prompted - never commit them.
+      - key: SF_CLIENT_ID
+        sync: false
+      - key: SF_CLIENT_SECRET
+        sync: false
+      # Signs the visitor cookie; Render generates and keeps it.
+      - key: SESSION_SECRET
+        generateValue: true

@@ -1,0 +1,24 @@
+<apex:page standardController="Quote" extensions="QuoteApprovalController" showQuickActionVfHeader="false" lightningStylesheets="true">
+    <script>
+        function closePopupWindow() {
+            if (typeof sforce != 'undefined' && sforce && sforce.one) {
+                var quoteId = '{!Quote.Id}';
+                sforce.one.navigateToSObject(quoteId);
+            } else {
+                window.close();
+            }
+        }
+    </script>
+    <h2 align='center'>
+        Submit for Approval
+    </h2>
+   <apex:form >
+        <apex:pageBlock >
+            <apex:pageBlockButtons location="bottom">
+                <p align='left'>Enter comments for Approver(s):</p>
+                <p align='center'><apex:inputTextarea value="{!submitterComments}" cols="100"/></p>          
+                <apex:commandButton value="Submit" action="{!submitQuoteForApproval}" oncomplete="closePopupWindow();" /> 
+            </apex:pageBlockButtons>
+        </apex:pageBlock>
+    </apex:form>
+</apex:page>

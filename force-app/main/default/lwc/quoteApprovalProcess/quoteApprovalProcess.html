@@ -1,0 +1,23 @@
+<template>
+    <lightning-card title="Submit for Approval" icon-name="standard:approval">
+        <div class="slds-m-around_medium">
+            <lightning-textarea
+                label="Enter comments for Approver(s):"
+                value={submitterComments}
+                onchange={handleCommentChange}
+            ></lightning-textarea>
+            <div class="slds-m-top_medium slds-align_absolute-center">
+                <lightning-button
+                    label="Submit"
+                    variant="brand"
+                    onclick={handleSubmit}
+                    class="slds-m-right_x-small"
+                ></lightning-button>
+                <lightning-button
+                    label="Cancel"
+                    onclick={handleCancel}
+                ></lightning-button>
+            </div>
+        </div>
+    </lightning-card>
+</template>
