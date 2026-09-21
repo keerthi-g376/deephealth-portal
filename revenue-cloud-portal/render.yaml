@@ -1,15 +1,18 @@
 # Render blueprint: New + > Blueprint > pick the GitHub repo containing this folder.
+# In this repo the portal lives in a subfolder, so set "Blueprint Path" to revenue-cloud-portal/render.yaml
+# (the file, not the folder). rootDir makes Render build and run inside that folder.
 services:
   - type: web
     name: deephealth-portal # becomes https://deephealth-portal.onrender.com (if the name is free)
     runtime: node
     plan: free
+    rootDir: revenue-cloud-portal
     buildCommand: npm install --include=dev && npm run build
     startCommand: npm start
     healthCheckPath: /api/health
     envVars:
       - key: NODE_VERSION
-        value: 22
+        value: "22"
       - key: PUBLIC_MODE
         value: "true"
       - key: SF_INSTANCE_URL
