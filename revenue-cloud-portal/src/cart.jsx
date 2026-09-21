@@ -224,7 +224,7 @@ export function CartProvider({ taxRate, children }) {
     return {
       items,
       quote,
-      count: items.reduce((n, i) => n + i.quantity, 0),
+      count: items.length, // number of products in the cart, not the total of their quantities
       subtotal,
       tax,
       total: subtotal + tax,
