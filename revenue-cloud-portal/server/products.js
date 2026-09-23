@@ -7,7 +7,7 @@ const MAX_BUNDLE_DEPTH = 5;
 // Product catalog query from the API documentation, extended with the
 // ProductAttributeDefinitions sub-query (requires API v62.0+).
 const productQuery = (where, currency) => `
-  SELECT Id, Name, ProductCode, Family, Type, Description, DisplayUrl,
+  SELECT Id, Name, ProductCode, Family, Type, Description, DisplayUrl, BasedOnId,
     (SELECT Id, UnitPrice, CurrencyIsoCode, Pricebook2Id, Pricebook2.Name, UseStandardPrice
        FROM PricebookEntries
       WHERE Pricebook2.IsStandard = true AND Pricebook2.IsActive = true
@@ -105,7 +105,50 @@ async function picklistValues(picklistIds) {
 
 const attributeRecords = (p) => p.ProductAttributeDefinitions?.records ?? [];
 
-function normalize(p, picklists, currency, components, rulesByBundle) {
+// A product can inherit attributes from a Product Classification it's "Based On" (Product2.BasedOnId),
+// shown in Salesforce as that product's Inherited Attributes. Read alongside its own direct
+// ProductAttributeDefinitions, which is all the storefront's own products (e.g. AI Modality) have used so far.
+async function classificationAttributes(classificationIds) {
+  const byClassification = new Map();
+  if (!classificationIds.length) return byClassification;
+  const rows = await soql(
+    `SELECT ProductClassificationId, AttributeDefinitionId, AttributeDefinition.Name, AttributeDefinition.Label,
+            AttributeDefinition.DataType, AttributeDefinition.PicklistId, Sequence,
+            Status, IsRequired, IsHidden, IsReadOnly, DefaultValue, HelpText,
+            AttributeNameOverride, MaximumCharacterCount, DisplayType
+       FROM ProductClassificationAttr
+      WHERE ProductClassificationId IN (${idList(classificationIds)})
+      ORDER BY Sequence ASC`,
+  );
+  for (const r of rows) {
+    if (!byClassification.has(r.ProductClassificationId)) byClassification.set(r.ProductClassificationId, []);
+    byClassification.get(r.ProductClassificationId).push(r);
+  }
+  return byClassification;
+}
+
+// Shared shape: both ProductAttributeDefinition and ProductClassificationAttr rows carry the
+// same AttributeDefinition reference and the same Status/IsHidden/IsRequired/etc. fields.
+function toAttribute(a, picklists) {
+  const dataType = a.AttributeDefinition?.DataType;
+  const values = picklists.get(a.AttributeDefinition?.PicklistId) ?? [];
+  return {
+    id: a.AttributeDefinitionId,
+    name: a.AttributeDefinition?.Name,
+    label: a.AttributeNameOverride || a.AttributeDefinition?.Label || a.AttributeDefinition?.Name,
+    dataType,
+    // a required picklist with no active values could never be satisfied
+    required: !!a.IsRequired && !(dataType === 'Picklist' && values.length === 0),
+    readOnly: !!a.IsReadOnly,
+    defaultValue: a.DefaultValue ?? null,
+    helpText: a.HelpText || '',
+    displayType: a.DisplayType || null,
+    maxLength: a.MaximumCharacterCount ?? null,
+    values,
+  };
+}
+
+function normalize(p, picklists, currency, components, rulesByBundle, classificationAttrs) {
   const entry = p.PricebookEntries?.records?.[0];
   return {
     id: p.Id,
@@ -123,27 +166,18 @@ function normalize(p, picklists, currency, components, rulesByBundle) {
       term: o.ProductSellingModel?.PricingTerm,
       termUnit: o.ProductSellingModel?.PricingTermUnit,
     })),
-    // Only attributes a customer may see/set: active and not hidden.
-    attributes: attributeRecords(p)
-      .filter((a) => a.Status === 'Active' && !a.IsHidden)
-      .map((a) => {
-        const dataType = a.AttributeDefinition?.DataType;
-        const values = picklists.get(a.AttributeDefinition?.PicklistId) ?? [];
-        return {
-          id: a.AttributeDefinitionId,
-          name: a.AttributeDefinition?.Name,
-          label: a.AttributeNameOverride || a.AttributeDefinition?.Label || a.AttributeDefinition?.Name,
-          dataType,
-          // a required picklist with no active values could never be satisfied
-          required: !!a.IsRequired && !(dataType === 'Picklist' && values.length === 0),
-          readOnly: !!a.IsReadOnly,
-          defaultValue: a.DefaultValue ?? null,
-          helpText: a.HelpText || '',
-          displayType: a.DisplayType || null,
-          maxLength: a.MaximumCharacterCount ?? null,
-          values,
-        };
-      }),
+    // A product's own attributes plus any it inherits from its "Based On" classification (only
+    // active, non-hidden ones - own attributes win if the same AttributeDefinition appears twice).
+    attributes: (() => {
+      const byId = new Map();
+      for (const a of classificationAttrs.get(p.BasedOnId) ?? []) {
+        if (a.Status === 'Active' && !a.IsHidden) byId.set(a.AttributeDefinitionId, toAttribute(a, picklists));
+      }
+      for (const a of attributeRecords(p)) {
+        if (a.Status === 'Active' && !a.IsHidden) byId.set(a.AttributeDefinitionId, toAttribute(a, picklists));
+      }
+      return [...byId.values()];
+    })(),
     components: components.get(p.Id) ?? [],
     // Configurator rules that apply while shopping this bundle (e.g. auto-add a required companion product).
     configRules: p.Type === 'Bundle' ? rulesByBundle.get(p.Id.slice(0, 15)) ?? [] : [],
@@ -203,8 +237,14 @@ async function loadCatalog() {
   }
   for (const list of componentRows.values()) list.sort((a, b) => a.sequence - b.sequence);
 
+  const allRows = [...catalogRows, ...extraRows];
+  const classificationIds = [...new Set(allRows.map((p) => p.BasedOnId).filter(Boolean))];
+  const classificationAttrs = await classificationAttributes(classificationIds);
+
   const picklistIds = [
-    ...new Set([...catalogRows, ...extraRows].flatMap((p) => attributeRecords(p).map((a) => a.AttributeDefinition?.PicklistId).filter(Boolean))),
+    ...new Set(
+      [...allRows.flatMap(attributeRecords), ...classificationAttrs.values()].flat().map((a) => a.AttributeDefinition?.PicklistId).filter(Boolean),
+    ),
   ];
   const picklists = await picklistValues(picklistIds);
 
@@ -216,9 +256,9 @@ async function loadCatalog() {
   }
 
   return {
-    products: catalogRows.map((p) => normalize(p, picklists, currency, componentRows, rulesByBundle)),
+    products: catalogRows.map((p) => normalize(p, picklists, currency, componentRows, rulesByBundle, classificationAttrs)),
     // bundle children that are not listed in the catalog themselves
-    componentProducts: extraRows.map((p) => normalize(p, picklists, currency, componentRows, rulesByBundle)),
+    componentProducts: extraRows.map((p) => normalize(p, picklists, currency, componentRows, rulesByBundle, classificationAttrs)),
   };
 }
 
