@@ -11,7 +11,10 @@ const clamp = (n, lo, hi) => Math.min(hi, Math.max(lo, Math.floor(Number(n)) || 
 // first, ending with `product`), so components of a nested bundle land under their own bundle.
 export default function BundlePage({ product, chain, byId, onBack }) {
   const cart = useCart();
-  const [selected, setSelected] = useState(() => new Set());
+  // Required components are pre-selected when the bundle page opens (unless unpriced, so they can't be added anyway).
+  const [selected, setSelected] = useState(
+    () => new Set(product.components.filter((c) => c.required && byId.get(c.productId)?.unitPrice != null).map((c) => c.productId)),
+  );
   const [qtys, setQtys] = useState({});
 
   const groups = useMemo(() => {
