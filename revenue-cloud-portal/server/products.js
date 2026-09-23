@@ -31,6 +31,64 @@ const componentQuery = (parentIds) => `
     FROM ProductRelatedComponent
    WHERE ParentProductId IN (${idList(parentIds)}) AND ChildProduct.IsActive = true`;
 
+// Reads active, Bundle-scoped Configurator rules (e.g. "if Product A is selected, auto-add
+// Product B") built in Setup > Product Configurator > Configuration Rules, and turns their
+// internal JSON into a small generic shape the storefront can evaluate itself. Unrecognised
+// or malformed rules are skipped rather than failing the whole catalog load.
+function productIdsFromTagInfo(info, tagName) {
+  const tag = (info ?? []).find((t) => t.type === 'Tag' && t.name === tagName);
+  return (tag?.values?.values ?? []).filter(Boolean);
+}
+
+async function loadConfigurationRules(componentIdToProductId) {
+  let rows;
+  try {
+    rows = await soql(
+      `SELECT Id, ConfigurationRuleDefinition FROM ProductConfigurationRule
+        WHERE Status = 'Active' AND RuleType = 'Configurator' AND ProcessScope = 'Bundle'`,
+    );
+  } catch {
+    return []; // org may not have Product Configurator / Constraint Rules enabled
+  }
+
+  const rules = [];
+  for (const row of rows) {
+    let def;
+    try {
+      def = JSON.parse(row.ConfigurationRuleDefinition);
+    } catch {
+      continue;
+    }
+    const bundleProductId15 = String(def.criteria?.[0]?.rootObjectId ?? '').slice(0, 15);
+    if (!bundleProductId15) continue;
+
+    const criteria = (def.criteria ?? [])
+      .map((c) => ({
+        operator: c.sourceOperator || 'Equals',
+        productIds: productIdsFromTagInfo(c.sourceInformation, 'Product'),
+      }))
+      .filter((c) => c.productIds.length);
+
+    const actions = (def.actions ?? [])
+      .filter((a) => a.actionType === 'AutoAdd')
+      .map((a) => {
+        // usually a Product tag is on the action itself; fall back to the target
+        // ProductRelatedComponent id, which every bundle component's id is already keyed by.
+        const productId =
+          productIdsFromTagInfo(a.targetInformation, 'Product')[0] ||
+          componentIdToProductId.get(a.targetValues?.[0]) ||
+          null;
+        return productId ? { productId } : null;
+      })
+      .filter(Boolean);
+
+    if (criteria.length && actions.length) {
+      rules.push({ bundleProductId15, mode: def.criteriaExpressionType === 'Any' ? 'Any' : 'All', criteria, actions });
+    }
+  }
+  return rules;
+}
+
 async function picklistValues(picklistIds) {
   const byPicklist = new Map();
   if (!picklistIds.length) return byPicklist;
@@ -47,7 +105,7 @@ async function picklistValues(picklistIds) {
 
 const attributeRecords = (p) => p.ProductAttributeDefinitions?.records ?? [];
 
-function normalize(p, picklists, currency, components) {
+function normalize(p, picklists, currency, components, rulesByBundle) {
   const entry = p.PricebookEntries?.records?.[0];
   return {
     id: p.Id,
@@ -87,6 +145,8 @@ function normalize(p, picklists, currency, components) {
         };
       }),
     components: components.get(p.Id) ?? [],
+    // Configurator rules that apply while shopping this bundle (e.g. auto-add a required companion product).
+    configRules: p.Type === 'Bundle' ? rulesByBundle.get(p.Id.slice(0, 15)) ?? [] : [],
   };
 }
 
@@ -106,12 +166,14 @@ async function loadCatalog() {
   // in the catalog themselves are loaded too, so they can be shown and quoted.
   const known = new Set(catalogRows.map((r) => r.Id));
   const componentRows = new Map(); // parentId -> [component]
+  const componentIdToProductId = new Map(); // ProductRelatedComponent.Id -> child Product2 Id
   const extraRows = [];
   let frontier = catalogRows.filter((r) => r.Type === 'Bundle').map((r) => r.Id);
 
   for (let depth = 0; depth < MAX_BUNDLE_DEPTH && frontier.length; depth++) {
     const comps = await soql(componentQuery(frontier));
     for (const c of comps) {
+      componentIdToProductId.set(c.Id, c.ChildProductId);
       if (!componentRows.has(c.ParentProductId)) componentRows.set(c.ParentProductId, []);
       componentRows.get(c.ParentProductId).push({
         componentId: c.Id, // ProductRelatedComponent - recorded on the quote's bundle relationship
@@ -146,10 +208,17 @@ async function loadCatalog() {
   ];
   const picklists = await picklistValues(picklistIds);
 
+  const rules = await loadConfigurationRules(componentIdToProductId);
+  const rulesByBundle = new Map(); // bundle Product2 Id (15-char) -> [rule]
+  for (const r of rules) {
+    if (!rulesByBundle.has(r.bundleProductId15)) rulesByBundle.set(r.bundleProductId15, []);
+    rulesByBundle.get(r.bundleProductId15).push({ mode: r.mode, criteria: r.criteria, actions: r.actions });
+  }
+
   return {
-    products: catalogRows.map((p) => normalize(p, picklists, currency, componentRows)),
+    products: catalogRows.map((p) => normalize(p, picklists, currency, componentRows, rulesByBundle)),
     // bundle children that are not listed in the catalog themselves
-    componentProducts: extraRows.map((p) => normalize(p, picklists, currency, componentRows)),
+    componentProducts: extraRows.map((p) => normalize(p, picklists, currency, componentRows, rulesByBundle)),
   };
 }
 

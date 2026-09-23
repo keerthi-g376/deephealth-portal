@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { isConfigurable } from '../attributes.js';
 import { useCart } from '../cart.jsx';
+import { applyConfigRules, requiredByRules } from '../configRules.js';
 import { money, sellingModelLabel } from '../format.js';
 import { ArrowLeftIcon, CartIcon, LayersIcon, SlidersIcon } from './icons.jsx';
 
@@ -11,11 +12,6 @@ const clamp = (n, lo, hi) => Math.min(hi, Math.max(lo, Math.floor(Number(n)) || 
 // first, ending with `product`), so components of a nested bundle land under their own bundle.
 export default function BundlePage({ product, chain, byId, onBack }) {
   const cart = useCart();
-  // Required components are pre-selected when the bundle page opens (unless unpriced, so they can't be added anyway).
-  const [selected, setSelected] = useState(
-    () => new Set(product.components.filter((c) => c.required && byId.get(c.productId)?.unitPrice != null).map((c) => c.productId)),
-  );
-  const [qtys, setQtys] = useState({});
 
   const groups = useMemo(() => {
     const out = [];
@@ -35,14 +31,30 @@ export default function BundlePage({ product, chain, byId, onBack }) {
 
   const rows = groups.flatMap((g) => g.rows);
   const addable = rows.filter((r) => r.child.unitPrice != null);
+  const addableIds = useMemo(() => new Set(addable.map((r) => r.productId)), [addable]);
+  const rules = product.configRules ?? [];
+
+  // Required components are pre-selected when the bundle page opens (unless unpriced), and any
+  // Configurator rule that fires as a result (e.g. "OS requires RIS") is applied immediately too.
+  const [selected, setSelected] = useState(() =>
+    applyConfigRules(new Set(product.components.filter((c) => c.required && addableIds.has(c.productId)).map((c) => c.productId)), rules, addableIds),
+  );
+  const [qtys, setQtys] = useState({});
+
+  // Products currently selected only because a rule requires them right now - their checkbox is
+  // locked so unchecking one can't "stick" while the product that triggers the rule is still selected.
+  const lockedByRule = useMemo(() => requiredByRules(selected, rules), [selected, rules]);
+
   const qtyOf = (r) => qtys[r.productId] ?? r.quantity;
 
-  const toggle = (id) =>
+  const toggle = (id) => {
+    if (lockedByRule.has(id)) return;
     setSelected((s) => {
       const next = new Set(s);
       next.has(id) ? next.delete(id) : next.add(id);
-      return next;
+      return applyConfigRules(next, rules, addableIds);
     });
+  };
 
   // a bundle can only be quoted if it (and every bundle above it) has a price
   const unpricedBundle = chain.find((b) => b.unitPrice == null);
@@ -96,6 +108,7 @@ export default function BundlePage({ product, chain, byId, onBack }) {
             {g.rows.map((r) => {
               const c = r.child;
               const priced = c.unitPrice != null;
+              const locked = lockedByRule.has(r.productId);
               const lo = r.min ?? 1;
               const hi = r.max ?? 10000;
               return (
@@ -104,7 +117,7 @@ export default function BundlePage({ product, chain, byId, onBack }) {
                     type="checkbox"
                     className="comp-check"
                     checked={selected.has(r.productId)}
-                    disabled={!priced}
+                    disabled={!priced || locked}
                     onChange={() => toggle(r.productId)}
                     aria-label={`Select ${c.name}`}
                   />
@@ -113,6 +126,7 @@ export default function BundlePage({ product, chain, byId, onBack }) {
                     <small>{[c.code, c.family].filter(Boolean).join(' · ')}</small>
                     <div className="tags">
                       {r.required && <span className="tag tag-req">Required</span>}
+                      {locked && <span className="tag tag-req">Required by rule</span>}
                       {r.isDefault && <span className="tag">Default</span>}
                       {r.priceIncluded && <span className="tag">Price included in bundle</span>}
                       {c.isBundle && <span className="tag tag-bundle">Bundle</span>}
