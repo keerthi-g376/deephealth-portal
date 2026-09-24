@@ -7,7 +7,8 @@ export default function ProductCard({ product }) {
   const { items, add } = useCart();
   const inCart = items.filter((i) => i.productId === product.id).reduce((n, i) => n + i.quantity, 0);
   const priced = product.unitPrice != null;
-  const configurable = isConfigurable(product);
+  // A bundle's attributes are chosen on its Components page, so its card shows neither the list nor Configure.
+  const configurable = isConfigurable(product) && !product.isBundle;
 
   return (
     <article className="card">
