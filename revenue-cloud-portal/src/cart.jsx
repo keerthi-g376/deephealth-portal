@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { api } from './api.js';
-import { attributeKey } from './attributes.js';
+import { attributeKey, lineValuesByDefinitionId } from './attributes.js';
+import { adjustedPrice } from './pricing.js';
 
 const STORAGE_KEY = 'dh-portal-session-v1';
 const MAX_QTY = 10000;
@@ -49,7 +50,7 @@ function loadState() {
 const clampQty = (n) => Math.min(MAX_QTY, Math.max(1, Math.floor(Number(n)) || 1));
 
 // Adds a line (or adds to its quantity when it exists). `bump: false` leaves an existing line alone.
-function withLine(items, product, { quantity = 1, attributes = [], parentLineId = null, bump = true }) {
+function withLine(items, product, { quantity = 1, attributes = [], parentLineId = null, bump = true, unitPrice }) {
   const lineId = lineIdOf(product.id, attributes, parentLineId);
   if (items.some((i) => i.lineId === lineId)) {
     if (!bump) return { items, lineId };
@@ -62,7 +63,7 @@ function withLine(items, product, { quantity = 1, attributes = [], parentLineId 
     name: product.name,
     code: product.code,
     family: product.family,
-    unitPrice: product.unitPrice,
+    unitPrice: unitPrice ?? product.unitPrice, // attribute-based price when the line is configured
     quantity: clampQty(quantity),
     attributes,
   };
@@ -72,14 +73,19 @@ function withLine(items, product, { quantity = 1, attributes = [], parentLineId 
 function reducer(state, action) {
   switch (action.type) {
     case 'add':
-      return { ...state, items: withLine(state.items, action.product, { quantity: action.quantity, attributes: action.attributes }).items };
+      return {
+        ...state,
+        items: withLine(state.items, action.product, { quantity: action.quantity, attributes: action.attributes, unitPrice: action.unitPrice }).items,
+      };
     case 'addToBundle': {
-      // chain = the bundle (and any bundles above it) the components belong to, outermost first
+      // chain = the bundle (and any bundles above it) the components belong to, outermost first;
+      // action.bundle = the attribute choices / price of the LAST bundle in the chain, if it has any
       let items = state.items;
       let parentLineId = null;
-      for (const bundle of action.chain) {
-        ({ items, lineId: parentLineId } = withLine(items, bundle, { parentLineId, bump: false }));
-      }
+      action.chain.forEach((bundle, i) => {
+        const own = i === action.chain.length - 1 ? action.bundle ?? {} : {};
+        ({ items, lineId: parentLineId } = withLine(items, bundle, { parentLineId, bump: false, attributes: own.attributes, unitPrice: own.unitPrice }));
+      });
       for (const { product, quantity } of action.components) {
         ({ items } = withLine(items, product, { quantity, parentLineId }));
       }
@@ -112,7 +118,10 @@ function reducer(state, action) {
         ...state,
         items: state.items.map((i) => {
           const p = byId.get(i.productId);
-          return p && p.unitPrice != null ? { ...i, name: p.name, unitPrice: p.unitPrice } : i;
+          // a configured line is re-priced from its own attribute choices (attribute-based pricing)
+          return p && p.unitPrice != null
+            ? { ...i, name: p.name, unitPrice: adjustedPrice(p, lineValuesByDefinitionId(p, i.attributes)) }
+            : i;
         }),
       };
     }
@@ -235,9 +244,11 @@ export function CartProvider({ taxRate, children }) {
       dismissToast,
       notify,
       // add(product) works as before; add(product, { quantity, attributes }) adds a configured line
-      add: (product, options = {}) => dispatch({ type: 'add', product, quantity: options.quantity, attributes: options.attributes }),
-      // components: [{ product, quantity }] added under the last bundle of `chain`
-      addToBundle: (chain, components) => dispatch({ type: 'addToBundle', chain, components }),
+      add: (product, options = {}) =>
+        dispatch({ type: 'add', product, quantity: options.quantity, attributes: options.attributes, unitPrice: options.unitPrice }),
+      // components: [{ product, quantity }] added under the last bundle of `chain`;
+      // bundle: { attributes, unitPrice } for that last bundle when it was configured
+      addToBundle: (chain, components, bundle) => dispatch({ type: 'addToBundle', chain, components, bundle }),
       setQty: (lineId, quantity) => dispatch({ type: 'setQty', lineId, quantity }),
       remove: (lineId) => dispatch({ type: 'remove', lineId }),
       clear: () => dispatch({ type: 'clear' }),

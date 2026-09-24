@@ -1,8 +1,10 @@
 import { useMemo, useState } from 'react';
-import { isConfigurable } from '../attributes.js';
+import { initialValues, isConfigurable, missingRequired, toLineAttributes, valuesByDefinitionId } from '../attributes.js';
 import { useCart } from '../cart.jsx';
 import { applyConfigRules, requiredByRules } from '../configRules.js';
 import { money, sellingModelLabel } from '../format.js';
+import { adjustedPrice } from '../pricing.js';
+import { AttributeField } from './ConfigurePage.jsx';
 import { ArrowLeftIcon, CartIcon, LayersIcon, SlidersIcon } from './icons.jsx';
 
 const clamp = (n, lo, hi) => Math.min(hi, Math.max(lo, Math.floor(Number(n)) || lo));
@@ -41,6 +43,13 @@ export default function BundlePage({ product, chain, byId, onBack }) {
   );
   const [qtys, setQtys] = useState({});
 
+  // The bundle's own attributes (e.g. Center of Excellence: AI-powered Detection). Their values set the
+  // bundle's price (Attribute Based Adjustments) and are saved on the bundle line.
+  const hasAttributes = product.attributes.length > 0;
+  const [attrValues, setAttrValues] = useState(() => initialValues(product));
+  const bundlePrice = product.unitPrice == null ? null : adjustedPrice(product, valuesByDefinitionId(product, attrValues));
+  const missingAttrs = missingRequired(product, attrValues);
+
   // Products currently selected only because a rule requires them right now - their checkbox is
   // locked so unchecking one can't "stick" while the product that triggers the rule is still selected.
   const lockedByRule = useMemo(() => requiredByRules(selected, rules), [selected, rules]);
@@ -62,7 +71,11 @@ export default function BundlePage({ product, chain, byId, onBack }) {
 
   const addSelected = () => {
     const chosen = addable.filter((r) => selected.has(r.productId));
-    cart.addToBundle(chain, chosen.map((r) => ({ product: r.child, quantity: qtyOf(r) })));
+    cart.addToBundle(
+      chain,
+      chosen.map((r) => ({ product: r.child, quantity: qtyOf(r) })),
+      hasAttributes ? { attributes: toLineAttributes(product, attrValues), unitPrice: bundlePrice } : undefined,
+    );
     setSelected(new Set());
     cart.notify('success', `${chosen.length} product${chosen.length === 1 ? '' : 's'} added to the cart under ${product.name}`);
   };
@@ -98,6 +111,22 @@ export default function BundlePage({ product, chain, byId, onBack }) {
         Select the products you want. They are added to the cart nested under {product.name}, each at its own standard price.
       </p>
       {unpricedBundle && <p className="note warn">{unpricedBundle.name} has no active price, so its components can't be quoted.</p>}
+
+      {hasAttributes && (
+        <div className="panel">
+          <h2>Attributes</h2>
+          {product.attributes.map((a) => (
+            <AttributeField key={a.id} attr={a} value={attrValues[a.name] ?? ''} onChange={(v) => setAttrValues((s) => ({ ...s, [a.name]: v }))} />
+          ))}
+          {bundlePrice != null && (
+            <div className="bundle-price">
+              <span>Bundle price</span>
+              <strong>{money(bundlePrice, product.currency)}</strong>
+            </div>
+          )}
+          {missingAttrs.length > 0 && <p className="hint left">Required: {missingAttrs.join(', ')}</p>}
+        </div>
+      )}
 
       {rows.length === 0 && <p className="state">This bundle has no available components.</p>}
 
@@ -167,7 +196,7 @@ export default function BundlePage({ product, chain, byId, onBack }) {
           <button className="link" onClick={() => setSelected(new Set(selected.size === addable.length ? [] : addable.map((r) => r.productId)))}>
             {selected.size === addable.length ? 'Clear selection' : 'Select all'}
           </button>
-          <button className="btn btn-primary fit" disabled={selected.size === 0 || !!unpricedBundle} onClick={addSelected}>
+          <button className="btn btn-primary fit" disabled={selected.size === 0 || !!unpricedBundle || missingAttrs.length > 0} onClick={addSelected}>
             <CartIcon /> Add selected to cart ({selected.size})
           </button>
         </div>

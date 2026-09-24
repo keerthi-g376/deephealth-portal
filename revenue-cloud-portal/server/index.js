@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { SfError, authMode, callQuoteApi, insertRecords } from './salesforce.js';
 import { getProducts } from './products.js';
 import { rateLimit, readQuoteIds, rememberQuote } from './guard.js';
+import { adjustedPrice } from '../src/pricing.js';
 
 // Public mode = the portal is exposed to the internet. On by default whenever real Salesforce
 // credentials are configured (i.e. on the host), off for local development on the CLI session.
@@ -102,7 +103,9 @@ async function buildQuoteBody(rawItems, { requireItems }) {
     const key = `${parentLineId ?? ''}|${productId}|${attributes.map((a) => `${a.label}=${a.value}`).sort().join(';')}`;
     if (seen.has(key)) throw new SfError(`"${product.name}" appears twice with the same configuration`, 400);
     seen.add(key);
-    return { lineId, parentLineId, productId, product, quantity, unitPrice: product.unitPrice, attributes };
+    // the price may depend on the attribute values chosen (Salesforce Attribute Based Adjustments)
+    const chosen = Object.fromEntries(attributes.map((a) => [a.definitionId, a.value]));
+    return { lineId, parentLineId, productId, product, quantity, unitPrice: adjustedPrice(product, chosen), attributes };
   });
 
   // bundle structure: every parent must be a bundle line in this cart that lists the child as a component

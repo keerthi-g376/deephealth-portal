@@ -12,7 +12,7 @@ const productQuery = (where, currency) => `
        FROM PricebookEntries
       WHERE Pricebook2.IsStandard = true AND Pricebook2.IsActive = true
         AND IsActive = true AND CurrencyIsoCode = '${escapeSoql(currency)}'),
-    (SELECT ProductSellingModel.Name, ProductSellingModel.SellingModelType,
+    (SELECT ProductSellingModelId, ProductSellingModel.Name, ProductSellingModel.SellingModelType,
             ProductSellingModel.PricingTerm, ProductSellingModel.PricingTermUnit
        FROM ProductSellingModelOptions),
     (SELECT AttributeDefinitionId, AttributeDefinition.Name, AttributeDefinition.Label,
@@ -105,6 +105,72 @@ async function picklistValues(picklistIds) {
 
 const attributeRecords = (p) => p.ProductAttributeDefinitions?.records ?? [];
 
+// Attribute Based Adjustments (Setup > Product > Attribute Based Adjustment): "when attribute X = Y,
+// the price becomes / changes by Z". Read for the given products and turned into a small generic shape
+// (see src/pricing.js). Adjustments that are not currently effective, or that use something the
+// storefront cannot evaluate, are skipped so a price is never guessed.
+const parseSfDate = (s) => (s ? new Date(String(s).replace(/([+-]\d{2})(\d{2})$/, '$1:$2')) : null);
+const SUPPORTED_OPERATORS = new Set(['equals', 'notequals']);
+const SUPPORTED_TYPES = new Set(['Override', 'Amount']);
+
+async function loadAttributePricing(productIds, currency) {
+  const byProduct = new Map(); // productId -> [adjustment]
+  if (!productIds.length) return byProduct;
+  let adjustments;
+  let conditions;
+  try {
+    adjustments = await soql(
+      `SELECT Id, ProductId, AdjustmentType, AdjustmentValue, ProductSellingModelId, AttributeBasedAdjRuleId, EffectiveFrom, EffectiveTo
+         FROM AttributeBasedAdjustment
+        WHERE ProductId IN (${idList(productIds)}) AND CurrencyIsoCode = '${escapeSoql(currency)}'`,
+    );
+    const ruleIds = [...new Set(adjustments.map((a) => a.AttributeBasedAdjRuleId).filter(Boolean))];
+    conditions = ruleIds.length
+      ? await soql(
+          `SELECT AttributeBasedAdjRuleId, AttributeDefinitionId, Operator, StringValue, BooleanValue, IntegerValue, DoubleValue
+             FROM AttributeAdjustmentCondition WHERE AttributeBasedAdjRuleId IN (${idList(ruleIds)})`,
+        )
+      : [];
+  } catch {
+    return byProduct; // org without attribute-based pricing: list prices apply
+  }
+
+  const conditionsByRule = new Map();
+  for (const c of conditions) {
+    if (!conditionsByRule.has(c.AttributeBasedAdjRuleId)) conditionsByRule.set(c.AttributeBasedAdjRuleId, []);
+    conditionsByRule.get(c.AttributeBasedAdjRuleId).push(c);
+  }
+
+  const now = new Date();
+  for (const a of adjustments) {
+    const from = parseSfDate(a.EffectiveFrom);
+    const to = parseSfDate(a.EffectiveTo);
+    if ((from && from > now) || (to && to <= now)) continue;
+    if (!SUPPORTED_TYPES.has(a.AdjustmentType)) continue;
+
+    const parsed = (conditionsByRule.get(a.AttributeBasedAdjRuleId) ?? []).map((c) => {
+      if (!SUPPORTED_OPERATORS.has(String(c.Operator).toLowerCase())) return null;
+      let valueType;
+      let value;
+      if (c.BooleanValue != null) [valueType, value] = ['boolean', String(c.BooleanValue).toLowerCase() === 'true'];
+      else if (c.StringValue != null) [valueType, value] = ['string', c.StringValue];
+      else if (c.IntegerValue != null || c.DoubleValue != null) [valueType, value] = ['number', c.IntegerValue ?? c.DoubleValue];
+      else return null;
+      return { attributeId: c.AttributeDefinitionId, operator: String(c.Operator).toLowerCase(), valueType, value };
+    });
+    if (!parsed.length || parsed.includes(null)) continue;
+
+    if (!byProduct.has(a.ProductId)) byProduct.set(a.ProductId, []);
+    byProduct.get(a.ProductId).push({
+      sellingModelId: a.ProductSellingModelId || null,
+      type: a.AdjustmentType,
+      value: a.AdjustmentValue,
+      conditions: parsed,
+    });
+  }
+  return byProduct;
+}
+
 // A product can inherit attributes from a Product Classification it's "Based On" (Product2.BasedOnId),
 // shown in Salesforce as that product's Inherited Attributes. Read alongside its own direct
 // ProductAttributeDefinitions, which is all the storefront's own products (e.g. AI Modality) have used so far.
@@ -148,7 +214,7 @@ function toAttribute(a, picklists) {
   };
 }
 
-function normalize(p, picklists, currency, components, rulesByBundle, classificationAttrs) {
+function normalize(p, picklists, currency, components, rulesByBundle, classificationAttrs, pricingByProduct) {
   const entry = p.PricebookEntries?.records?.[0];
   return {
     id: p.Id,
@@ -161,6 +227,7 @@ function normalize(p, picklists, currency, components, rulesByBundle, classifica
     currency: entry?.CurrencyIsoCode || currency,
     isBundle: p.Type === 'Bundle',
     sellingModels: (p.ProductSellingModelOptions?.records ?? []).map((o) => ({
+      id: o.ProductSellingModelId,
       name: o.ProductSellingModel?.Name,
       type: o.ProductSellingModel?.SellingModelType,
       term: o.ProductSellingModel?.PricingTerm,
@@ -178,6 +245,10 @@ function normalize(p, picklists, currency, components, rulesByBundle, classifica
       }
       return [...byId.values()];
     })(),
+    // Attribute-driven price adjustments that apply to this product (only ones for a selling model it offers).
+    attributePricing: (pricingByProduct.get(p.Id) ?? []).filter(
+      (adj) => !adj.sellingModelId || (p.ProductSellingModelOptions?.records ?? []).some((o) => o.ProductSellingModelId === adj.sellingModelId),
+    ),
     components: components.get(p.Id) ?? [],
     // Configurator rules that apply while shopping this bundle (e.g. auto-add a required companion product).
     configRules: p.Type === 'Bundle' ? rulesByBundle.get(p.Id.slice(0, 15)) ?? [] : [],
@@ -248,6 +319,8 @@ async function loadCatalog() {
   ];
   const picklists = await picklistValues(picklistIds);
 
+  const pricingByProduct = await loadAttributePricing(allRows.map((p) => p.Id), currency);
+
   const rules = await loadConfigurationRules(componentIdToProductId);
   const rulesByBundle = new Map(); // bundle Product2 Id (15-char) -> [rule]
   for (const r of rules) {
@@ -256,9 +329,11 @@ async function loadCatalog() {
   }
 
   return {
-    products: catalogRows.map((p) => normalize(p, picklists, currency, componentRows, rulesByBundle, classificationAttrs)),
+    products: catalogRows.map((p) => normalize(p, picklists, currency, componentRows, rulesByBundle, classificationAttrs, pricingByProduct)),
     // bundle children that are not listed in the catalog themselves
-    componentProducts: extraRows.map((p) => normalize(p, picklists, currency, componentRows, rulesByBundle, classificationAttrs)),
+    componentProducts: extraRows.map((p) =>
+      normalize(p, picklists, currency, componentRows, rulesByBundle, classificationAttrs, pricingByProduct),
+    ),
   };
 }
 

@@ -1,10 +1,11 @@
 import { useState } from 'react';
-import { initialValues, missingRequired, toLineAttributes } from '../attributes.js';
+import { initialValues, missingRequired, toLineAttributes, valuesByDefinitionId } from '../attributes.js';
 import { useCart } from '../cart.jsx';
 import { money, sellingModelLabel } from '../format.js';
+import { adjustedPrice } from '../pricing.js';
 import { ArrowLeftIcon, BoxIcon, CartIcon } from './icons.jsx';
 
-function AttributeField({ attr, value, onChange }) {
+export function AttributeField({ attr, value, onChange }) {
   const id = `attr-${attr.id}`;
   let control;
   if (attr.dataType === 'Picklist') {
@@ -62,9 +63,11 @@ export default function ConfigurePage({ product, onBack }) {
   const priced = product.unitPrice != null;
   const missing = missingRequired(product, values);
   const canAdd = priced && missing.length === 0;
+  // the price can depend on the attribute values chosen (Attribute Based Adjustments in Salesforce)
+  const unitPrice = priced ? adjustedPrice(product, valuesByDefinitionId(product, values)) : null;
 
   const add = () => {
-    cart.add(product, { quantity: qty, attributes: toLineAttributes(product, values) });
+    cart.add(product, { quantity: qty, attributes: toLineAttributes(product, values), unitPrice });
     cart.notify('success', `${product.name} added to the cart`);
   };
 
@@ -120,8 +123,8 @@ export default function ConfigurePage({ product, onBack }) {
           <div className="price">
             {priced ? (
               <>
-                <strong>{money(product.unitPrice * qty, product.currency)}</strong>
-                <small>{money(product.unitPrice, product.currency)} per unit</small>
+                <strong>{money(unitPrice * qty, product.currency)}</strong>
+                <small>{money(unitPrice, product.currency)} per unit</small>
               </>
             ) : (
               <small>No active price - this product cannot be quoted</small>

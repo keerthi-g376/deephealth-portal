@@ -26,6 +26,14 @@ export const toLineAttributes = (product, values) =>
     .filter((a) => String(values[a.name] ?? '').trim() !== '')
     .map((a) => ({ name: a.name, label: a.label, value: values[a.name], display: displayValue(a, values[a.name]) }));
 
+// Chosen values keyed by AttributeDefinition id (what attribute-based pricing looks at), built from
+// values keyed by attribute name (the Configure form) or from a cart line's saved attributes.
+export const valuesByDefinitionId = (product, valuesByName) =>
+  Object.fromEntries(product.attributes.map((a) => [a.id, valuesByName[a.name] ?? '']));
+
+export const lineValuesByDefinitionId = (product, attributes = []) =>
+  valuesByDefinitionId(product, Object.fromEntries(attributes.map((a) => [a.name, a.value])));
+
 // Two lines are the same cart line only if product AND attribute choices match.
 export const attributeKey = (attributes = []) =>
   attributes
