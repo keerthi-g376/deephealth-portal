@@ -36,23 +36,36 @@ export default function BundlePage({ product, chain, byId, onBack }) {
   const addableIds = useMemo(() => new Set(addable.map((r) => r.productId)), [addable]);
   const rules = product.configRules ?? [];
 
+  // The bundle's own attributes (e.g. Center of Excellence: AI powered Detection). Their values set the
+  // bundle's price (Attribute Based Adjustments), can trigger Configurator rules, and are saved on the bundle line.
+  const hasAttributes = product.attributes.length > 0;
+  const [attrValues, setAttrValues] = useState(() => initialValues(product));
+  const attrsById = useMemo(() => valuesByDefinitionId(product, attrValues), [product, attrValues]);
+  const bundlePrice = product.unitPrice == null ? null : adjustedPrice(product, attrsById);
+  const missingAttrs = missingRequired(product, attrValues);
+
   // Required components are pre-selected when the bundle page opens (unless unpriced), and any
   // Configurator rule that fires as a result (e.g. "OS requires RIS") is applied immediately too.
   const [selected, setSelected] = useState(() =>
-    applyConfigRules(new Set(product.components.filter((c) => c.required && addableIds.has(c.productId)).map((c) => c.productId)), rules, addableIds),
+    applyConfigRules(
+      new Set(product.components.filter((c) => c.required && addableIds.has(c.productId)).map((c) => c.productId)),
+      rules,
+      addableIds,
+      attrsById,
+    ),
   );
   const [qtys, setQtys] = useState({});
 
-  // The bundle's own attributes (e.g. Center of Excellence: AI-powered Detection). Their values set the
-  // bundle's price (Attribute Based Adjustments) and are saved on the bundle line.
-  const hasAttributes = product.attributes.length > 0;
-  const [attrValues, setAttrValues] = useState(() => initialValues(product));
-  const bundlePrice = product.unitPrice == null ? null : adjustedPrice(product, valuesByDefinitionId(product, attrValues));
-  const missingAttrs = missingRequired(product, attrValues);
-
   // Products currently selected only because a rule requires them right now - their checkbox is
   // locked so unchecking one can't "stick" while the product that triggers the rule is still selected.
-  const lockedByRule = useMemo(() => requiredByRules(selected, rules), [selected, rules]);
+  const lockedByRule = useMemo(() => requiredByRules(selected, rules, attrsById), [selected, rules, attrsById]);
+
+  // Changing an attribute can trigger a rule (e.g. AI powered Detection = Yes adds SmartMammo AI).
+  const changeAttribute = (name, value) => {
+    const next = { ...attrValues, [name]: value };
+    setAttrValues(next);
+    setSelected((s) => applyConfigRules(s, rules, addableIds, valuesByDefinitionId(product, next)));
+  };
 
   const qtyOf = (r) => qtys[r.productId] ?? r.quantity;
 
@@ -61,7 +74,7 @@ export default function BundlePage({ product, chain, byId, onBack }) {
     setSelected((s) => {
       const next = new Set(s);
       next.has(id) ? next.delete(id) : next.add(id);
-      return applyConfigRules(next, rules, addableIds);
+      return applyConfigRules(next, rules, addableIds, attrsById);
     });
   };
 
@@ -116,7 +129,7 @@ export default function BundlePage({ product, chain, byId, onBack }) {
         <div className="panel">
           <h2>Attributes</h2>
           {product.attributes.map((a) => (
-            <AttributeField key={a.id} attr={a} value={attrValues[a.name] ?? ''} onChange={(v) => setAttrValues((s) => ({ ...s, [a.name]: v }))} />
+            <AttributeField key={a.id} attr={a} value={attrValues[a.name] ?? ''} onChange={(v) => changeAttribute(a.name, v)} />
           ))}
           {bundlePrice != null && (
             <div className="bundle-price">

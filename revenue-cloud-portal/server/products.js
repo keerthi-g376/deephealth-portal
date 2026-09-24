@@ -62,12 +62,24 @@ async function loadConfigurationRules(componentIdToProductId) {
     const bundleProductId15 = String(def.criteria?.[0]?.rootObjectId ?? '').slice(0, 15);
     if (!bundleProductId15) continue;
 
+    // A criterion can also carry attribute conditions ("Product = the bundle AND AI powered Detection = Yes").
+    // Those are only understood when they are on the bundle itself (its attributes are what the bundle page
+    // shows); a rule with any other attribute condition is skipped rather than run half-understood.
+    let understood = true;
     const criteria = (def.criteria ?? [])
-      .map((c) => ({
-        operator: c.sourceOperator || 'Equals',
-        productIds: productIdsFromTagInfo(c.sourceInformation, 'Product'),
-      }))
+      .map((c) => {
+        const productIds = productIdsFromTagInfo(c.sourceInformation, 'Product');
+        const onBundle = productIds.some((id) => id.slice(0, 15) === bundleProductId15);
+        const attributes = (c.conditions ?? [])
+          .filter((x) => x.type === 'Attribute')
+          .map((x) => ({ attributeId: String(x.attributeId ?? '').slice(0, 15), operator: x.operator, values: (x.values ?? []).map(String) }));
+        if (attributes.length && (!onBundle || attributes.some((x) => !x.attributeId || !['Equals', 'Not Equals', 'In', 'Not In'].includes(x.operator)))) {
+          understood = false;
+        }
+        return { operator: c.sourceOperator || 'Equals', productIds, onBundle, attributes };
+      })
       .filter((c) => c.productIds.length);
+    if (!understood) continue;
 
     const actions = (def.actions ?? [])
       .filter((a) => a.actionType === 'AutoAdd')
