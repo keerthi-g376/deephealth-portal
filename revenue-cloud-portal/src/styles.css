@@ -239,3 +239,4 @@ a.quote-pill:hover { border-color: var(--cyan); }
   .chat-fab { bottom: 92px; right: 16px; }
   .chat-panel { right: 16px; bottom: 16px; }
 }
+.chat-msg p.chat-added { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); font-size: 0.8rem; color: var(--ok); }

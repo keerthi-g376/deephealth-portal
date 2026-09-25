@@ -41,8 +41,9 @@ function Answer({ text }) {
 }
 
 // AI shopping assistant. Shown only when the server has an Anthropic key configured (/api/health -> chat).
-export default function ChatWidget() {
-  const { items } = useCart();
+export default function ChatWidget({ products = [] }) {
+  const cart = useCart();
+  const { items } = cart;
   const [enabled, setEnabled] = useState(false);
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState([]); // { role: 'user' | 'assistant' | 'error', content }
@@ -71,13 +72,23 @@ export default function ChatWidget() {
   const send = async (text) => {
     const content = text.trim();
     if (!content || busy) return;
-    const history = [...messages.filter((m) => m.role !== 'error'), { role: 'user', content }];
+    const history = [...messages.filter((m) => m.role !== 'error'), { role: 'user', content }].map(({ role, content: c, actions }) => ({ role, content: c, actions }));
     setMessages((m) => [...m, { role: 'user', content }]);
     setInput('');
     setBusy(true);
     try {
-      const { reply } = await api.chat(history, items.map(({ name, quantity }) => ({ name, quantity })));
-      setMessages((m) => [...m, { role: 'assistant', content: reply }]);
+      const { reply, actions = [] } = await api.chat(history, items.map(({ name, quantity }) => ({ name, quantity })));
+      // the assistant asked for products to be added: do it exactly like the card's Add button (only listed, priced products)
+      const byId = new Map(products.map((p) => [p.id, p]));
+      const applied = [];
+      for (const a of actions) {
+        const product = byId.get(a.productId);
+        if (a.type !== 'add' || !product || product.unitPrice == null) continue;
+        cart.add(product, { quantity: a.quantity });
+        applied.push({ type: 'add', productId: product.id, quantity: a.quantity, name: product.name });
+      }
+      if (applied.length) cart.notify('success', `${applied.map((a) => a.name).join(', ')} added to the cart`);
+      setMessages((m) => [...m, { role: 'assistant', content: reply, actions: applied }]);
     } catch (err) {
       setMessages((m) => [...m, { role: 'error', content: err.message }]);
     } finally {
@@ -122,6 +133,9 @@ export default function ChatWidget() {
             {messages.map((m, i) => (
               <div className={`chat-msg ${m.role}`} key={i}>
                 {m.role === 'assistant' ? <Answer text={m.content} /> : <p>{m.content}</p>}
+                {m.actions?.length > 0 && (
+                  <p className="chat-added">✓ Added to cart: {m.actions.map((a) => `${a.name}${a.quantity > 1 ? ` × ${a.quantity}` : ''}`).join(', ')}</p>
+                )}
               </div>
             ))}
             {busy && (

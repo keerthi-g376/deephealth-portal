@@ -256,7 +256,7 @@ app.post(
     ? rateLimit({ windowMs: 3_600_000, max: 40, message: 'You have reached the hourly limit for the assistant. Please try again later.' })
     : (_req, _res, next) => next(),
   wrap(async (req, res) => {
-    res.json({ reply: await askAssistant(req.body?.messages, req.body?.cart) });
+    res.json(await askAssistant(req.body?.messages, req.body?.cart));
   }),
 );
 
