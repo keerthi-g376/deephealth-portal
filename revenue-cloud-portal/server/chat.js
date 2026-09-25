@@ -142,6 +142,8 @@ export async function askAssistant(rawMessages, cart) {
     }
     if (err instanceof Anthropic.APIError) console.error(`Assistant request failed (${err.status}): ${err.message}`);
     else console.error(err);
-    throw new SfError('The assistant could not answer right now. Please try again.', 502);
+    // TEMPORARY diagnosis: show why the request failed (remove once the assistant works)
+    const why = err instanceof Anthropic.APIError ? `${err.status}: ${String(err.message).slice(0, 260)}` : String(err?.message ?? err).slice(0, 200);
+    throw new SfError(`The assistant could not answer right now. Please try again. [${why}]`, 502);
   }
 }
