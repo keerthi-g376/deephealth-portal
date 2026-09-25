@@ -9,17 +9,13 @@ import ProductCard from './components/ProductCard.jsx';
 import Toasts from './components/Toasts.jsx';
 import { BoxIcon, CartIcon, SearchIcon } from './components/icons.jsx';
 
-const DEFAULT_TAX_RATE = 0.18;
-
 function useCatalog() {
-  const [state, setState] = useState({ status: 'loading', products: [], componentProducts: [], taxRate: DEFAULT_TAX_RATE, error: '' });
+  const [state, setState] = useState({ status: 'loading', products: [], componentProducts: [], error: '' });
   const load = useCallback(() => {
     setState((s) => ({ ...s, status: 'loading', error: '' }));
     api
       .getProducts()
-      .then((d) =>
-        setState({ status: 'ready', products: d.products, componentProducts: d.componentProducts ?? [], taxRate: d.taxRate, error: '' }),
-      )
+      .then((d) => setState({ status: 'ready', products: d.products, componentProducts: d.componentProducts ?? [], error: '' }))
       .catch((e) => setState((s) => ({ ...s, status: 'error', error: e.message })));
   }, []);
   useEffect(load, [load]);
@@ -51,7 +47,7 @@ function useRoute() {
   return { route, back };
 }
 
-function Storefront({ catalog, taxRate }) {
+function Storefront({ catalog }) {
   const cart = useCart();
   const { route, back } = useRoute();
   const [query, setQuery] = useState('');
@@ -191,7 +187,7 @@ function Storefront({ catalog, taxRate }) {
         )}
       </main>
 
-      <Cart open={cartOpen} onClose={() => setCartOpen(false)} taxRate={taxRate} />
+      <Cart open={cartOpen} onClose={() => setCartOpen(false)} />
       <Toasts />
     </>
   );
@@ -200,8 +196,8 @@ function Storefront({ catalog, taxRate }) {
 export default function App() {
   const catalog = useCatalog();
   return (
-    <CartProvider taxRate={catalog.taxRate}>
-      <Storefront catalog={catalog} taxRate={catalog.taxRate} />
+    <CartProvider>
+      <Storefront catalog={catalog} />
     </CartProvider>
   );
 }

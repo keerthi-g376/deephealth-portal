@@ -30,11 +30,6 @@ const ownQuoteOnly = (req, _res, next) => {
   next();
 };
 
-const taxRate = () => {
-  const r = Number(process.env.TAX_RATE ?? 0.18);
-  return Number.isFinite(r) && r >= 0 ? r : 0;
-};
-
 const SF_ID = /^[a-zA-Z0-9]{15,18}$/;
 const MAX_QTY = 10_000;
 const MAX_TEXT = 255;
@@ -131,7 +126,7 @@ async function buildQuoteBody(rawItems, { requireItems }) {
     lines,
     body: {
       lineItems: lines.map(({ productId, quantity, unitPrice }) => ({ productId, quantity, unitPrice })),
-      tax: Math.round(subtotal * taxRate()),
+      tax: 0, // Salesforce holds no tax rate, so the portal adds none
     },
   };
 }
@@ -213,7 +208,7 @@ app.get(
   '/api/products',
   wrap(async (_req, res) => {
     // public mode serves the short-lived cache so visitors don't each trigger Salesforce queries
-    res.json({ taxRate: taxRate(), ...(await getProducts({ fresh: !publicMode })) });
+    res.json(await getProducts({ fresh: !publicMode }));
   }),
 );
 

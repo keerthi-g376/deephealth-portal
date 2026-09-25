@@ -3,7 +3,7 @@ import { useCart } from '../cart.jsx';
 import { money } from '../format.js';
 import { CloseIcon, TrashIcon } from './icons.jsx';
 
-export default function Cart({ open, onClose, taxRate }) {
+export default function Cart({ open, onClose }) {
   const cart = useCart();
   const { items, quote, dirty, locked, saving } = cart;
 
@@ -127,10 +127,6 @@ export default function Cart({ open, onClose, taxRate }) {
             <div>
               <dt>Subtotal</dt>
               <dd>{money(cart.subtotal)}</dd>
-            </div>
-            <div>
-              <dt>Tax ({Math.round(taxRate * 100)}%)</dt>
-              <dd>{money(cart.tax)}</dd>
             </div>
             <div className="grand">
               <dt>Total</dt>

@@ -148,7 +148,7 @@ const summarize = (q) => ({
 const CartContext = createContext(null);
 export const useCart = () => useContext(CartContext);
 
-export function CartProvider({ taxRate, children }) {
+export function CartProvider({ children }) {
   const [state, dispatch] = useReducer(reducer, undefined, loadState);
   const [saving, setSaving] = useState(false);
   const [toasts, setToasts] = useState([]);
@@ -228,15 +228,13 @@ export function CartProvider({ taxRate, children }) {
   const value = useMemo(() => {
     const { items, quote, syncedSig } = state;
     const subtotal = items.reduce((sum, i) => sum + i.unitPrice * i.quantity, 0);
-    const tax = Math.round(subtotal * taxRate);
     const dirty = !quote || signature(items) !== syncedSig;
     return {
       items,
       quote,
       count: items.length, // number of products in the cart, not the total of their quantities
       subtotal,
-      tax,
-      total: subtotal + tax,
+      total: subtotal, // no tax: Salesforce has none to add
       dirty,
       locked: !!quote && !EDITABLE_STATUSES.includes(quote.status),
       saving,
@@ -256,7 +254,7 @@ export function CartProvider({ taxRate, children }) {
       refreshPrices: (products) => dispatch({ type: 'refreshPrices', products }),
       saveQuote,
     };
-  }, [state, saving, toasts, taxRate, saveQuote, dismissToast, notify]);
+  }, [state, saving, toasts, saveQuote, dismissToast, notify]);
 
   return <CartContext.Provider value={value}>{children}</CartContext.Provider>;
 }

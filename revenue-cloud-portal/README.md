@@ -33,8 +33,8 @@ With no `SF_CLIENT_ID` / `SF_CLIENT_SECRET` in `.env` the server uses your logge
 | quote Approved/Rejected/Converted | disabled + "Start a new quote" | Salesforce only allows line-item edits in Draft/Pending |
 
 The quote id + cart are kept in `sessionStorage`, so a refresh keeps the link. A synchronous guard means
-double-clicking can never send two requests. Tax = `TAX_RATE` (default 18%, as in the reference portal), applied
-server-side on both create and update.
+double-clicking can never send two requests. No tax is added: Salesforce holds no tax rate, so the quote is saved with Tax = 0 and the
+total equals the subtotal.
 
 ## Bundles
 
