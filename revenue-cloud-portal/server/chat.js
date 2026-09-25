@@ -4,11 +4,19 @@ import { getProducts } from './products.js';
 
 // The portal's AI shopping assistant. It answers from the same live Salesforce catalog the storefront
 // shows (products, prices, bundle components, attributes, attribute pricing, configurator rules) and
-// never sees or changes anything else. The Anthropic key stays on the server.
+// never sees or changes anything else. The API key stays on the server.
+//
+// Two providers are supported, chosen by which key is configured (the first one wins):
+//  1. CHAT_API_KEY  - any OpenAI-compatible chat API, including free tiers (Groq, Google Gemini, OpenRouter ...).
+//                     CHAT_BASE_URL and CHAT_MODEL pick the provider and model.
+//  2. ANTHROPIC_API_KEY - Claude (needs paid credit). CHAT_MODEL optionally overrides claude-opus-5.
 
-export const chatEnabled = () => Boolean(process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN);
+const openAiCompatible = () => Boolean(process.env.CHAT_API_KEY);
+export const chatEnabled = () => Boolean(process.env.CHAT_API_KEY || process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN);
 
-const MODEL = () => process.env.CHAT_MODEL || 'claude-opus-5';
+const CLAUDE_MODEL = () => process.env.CHAT_MODEL || 'claude-opus-5';
+const CHAT_BASE_URL = () => (process.env.CHAT_BASE_URL || 'https://api.groq.com/openai/v1').replace(/\/+$/, '');
+const CHAT_MODEL = () => process.env.CHAT_MODEL || 'openai/gpt-oss-20b';
 const MAX_MESSAGES = 12; // most recent turns sent to the model
 const MAX_CHARS = 600; // per user message
 
@@ -106,44 +114,85 @@ const cartText = (cart) => {
   return `The customer's cart right now:\n${rows.join('\n')}`;
 };
 
-export async function askAssistant(rawMessages, cart) {
-  if (!chatEnabled()) throw new SfError('The assistant is not set up on this server.', 503);
-  const messages = cleanMessages(rawMessages);
-  const catalog = await getProducts();
+const REFUSAL_TEXT = "I can't help with that one. I can answer questions about the DeepHealth products, prices and bundles though.";
+const NO_ANSWER = 'Sorry, I could not come up with an answer. Please try rephrasing your question.';
+const BUSY = 'The assistant is busy right now. Please try again in a moment.';
 
+// Any OpenAI-compatible chat completions endpoint (free tiers such as Groq or Google Gemini work this way).
+async function askOpenAiCompatible(system, messages) {
+  let res;
+  try {
+    res = await fetch(`${CHAT_BASE_URL()}/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.CHAT_API_KEY}` },
+      body: JSON.stringify({ model: CHAT_MODEL(), max_tokens: 1200, temperature: 0.3, messages: [{ role: 'system', content: system }, ...messages] }),
+      signal: AbortSignal.timeout(45_000),
+    });
+  } catch (err) {
+    console.error(`Assistant request could not be sent: ${err.message}`);
+    throw new SfError('The assistant could not answer right now. Please try again. (no response)', 502);
+  }
+  if (res.status === 429) throw new SfError(BUSY, 429);
+  if (!res.ok) {
+    console.error(`Assistant request failed (${res.status}): ${(await res.text().catch(() => '')).slice(0, 500)}`);
+    if (res.status === 401 || res.status === 403) throw new SfError('The assistant is not available right now. (code ' + res.status + ')', 503);
+    throw new SfError(`The assistant could not answer right now. Please try again. (code ${res.status})`, 502);
+  }
+  const data = await res.json().catch(() => null);
+  const choice = data?.choices?.[0];
+  return { text: String(choice?.message?.content ?? '').trim(), refused: choice?.finish_reason === 'content_filter' };
+}
+
+async function askClaude(system, messages) {
   try {
     // fallbacks: "default" lets the API re-run the request on a fallback model if the primary declines it
     const res = await anthropic().beta.messages.create({
-      model: MODEL(),
+      model: CLAUDE_MODEL(),
       max_tokens: 2048,
       betas: ['server-side-fallback-2026-07-01'],
       fallbacks: 'default',
       output_config: { effort: 'low' }, // a short shopping answer needs little deliberation
-      system: [
-        { type: 'text', text: RULES },
-        // the catalog is identical across turns and visitors, so it is cached; the changing cart goes after it
-        { type: 'text', text: catalogText(catalog), cache_control: { type: 'ephemeral' } },
-        { type: 'text', text: cartText(cart) },
-      ],
+      system,
       messages,
     });
-    if (res.stop_reason === 'refusal') return "I can't help with that one. I can answer questions about the DeepHealth products, prices and bundles though.";
     const text = res.content
       .filter((b) => b.type === 'text')
       .map((b) => b.text)
       .join('\n')
       .trim();
-    return text || 'Sorry, I could not come up with an answer. Please try rephrasing your question.';
+    return { text, refused: res.stop_reason === 'refusal' };
   } catch (err) {
-    if (err instanceof Anthropic.RateLimitError) throw new SfError('The assistant is busy right now. Please try again in a moment.', 429);
+    if (err instanceof Anthropic.RateLimitError) throw new SfError(BUSY, 429);
     if (err instanceof Anthropic.AuthenticationError || err instanceof Anthropic.PermissionDeniedError) {
       console.error('Assistant credentials were rejected by Anthropic.');
       throw new SfError('The assistant is not available right now.', 503);
     }
     if (err instanceof Anthropic.APIError) console.error(`Assistant request failed (${err.status}): ${err.message}`);
     else console.error(err);
-    // TEMPORARY diagnosis: show why the request failed (remove once the assistant works)
-    const why = err instanceof Anthropic.APIError ? `${err.status}: ${String(err.message).slice(0, 260)}` : String(err?.message ?? err).slice(0, 200);
-    throw new SfError(`The assistant could not answer right now. Please try again. [${why}]`, 502);
+    throw new SfError(`The assistant could not answer right now. Please try again.${err.status ? ` (code ${err.status})` : ''}`, 502);
   }
+}
+
+export async function askAssistant(rawMessages, cart) {
+  if (!chatEnabled()) throw new SfError('The assistant is not set up on this server.', 503);
+  const messages = cleanMessages(rawMessages);
+  const catalog = catalogText(await getProducts());
+  const cartInfo = cartText(cart);
+
+  let answer;
+  if (openAiCompatible()) {
+    answer = await askOpenAiCompatible([RULES, catalog, cartInfo].join('\n\n'), messages);
+  } else {
+    answer = await askClaude(
+      [
+        { type: 'text', text: RULES },
+        // the catalog is identical across turns and visitors, so it is cached; the changing cart goes after it
+        { type: 'text', text: catalog, cache_control: { type: 'ephemeral' } },
+        { type: 'text', text: cartInfo },
+      ],
+      messages,
+    );
+  }
+  if (answer.refused) return REFUSAL_TEXT;
+  return answer.text || NO_ANSWER;
 }
