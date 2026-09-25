@@ -12,7 +12,14 @@ const inline = (text) =>
 // Just enough formatting for the assistant's answers (bold, bullet lists, paragraphs) - always rendered as text, never as HTML.
 function Answer({ text }) {
   const blocks = [];
-  for (const line of text.split('\n')) {
+  const lines = text.split('\n');
+  for (let n = 0; n < lines.length; n++) {
+    let line = lines[n];
+    // a markdown table row becomes a bullet (its header row and the --- divider row are dropped)
+    if (/^\s*\|.*\|\s*$/.test(line)) {
+      if (/^[\s|:-]+$/.test(line) || /^[\s|:-]+$/.test(lines[n + 1] ?? '')) continue;
+      line = `- ${line.split('|').map((c) => c.trim()).filter(Boolean).join(' — ')}`;
+    }
     const bullet = /^\s*[-*•]\s+(.*)$/.exec(line);
     if (bullet) {
       const last = blocks[blocks.length - 1];
