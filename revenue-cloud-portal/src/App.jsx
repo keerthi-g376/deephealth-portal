@@ -4,6 +4,7 @@ import { isConfigurable } from './attributes.js';
 import { CartProvider, useCart } from './cart.jsx';
 import BundlePage from './components/BundlePage.jsx';
 import Cart from './components/Cart.jsx';
+import ChatWidget from './components/ChatWidget.jsx';
 import ConfigurePage from './components/ConfigurePage.jsx';
 import ProductCard from './components/ProductCard.jsx';
 import QuotePage from './components/QuotePage.jsx';
@@ -192,6 +193,7 @@ function Storefront({ catalog }) {
       </main>
 
       <Cart open={cartOpen} onClose={() => setCartOpen(false)} />
+      <ChatWidget />
       <Toasts />
     </>
   );

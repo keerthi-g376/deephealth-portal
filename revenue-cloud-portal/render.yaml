@@ -22,6 +22,10 @@ services:
         sync: false
       - key: SF_CLIENT_SECRET
         sync: false
+      # AI shopping assistant: paste your Anthropic API key in the Render dashboard (never commit it).
+      # Without it the portal works as before and the "Ask AI" button is simply not shown.
+      - key: ANTHROPIC_API_KEY
+        sync: false
       # Signs the visitor cookie; Render generates and keeps it.
       - key: SESSION_SECRET
         generateValue: true

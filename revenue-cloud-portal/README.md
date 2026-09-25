@@ -100,3 +100,11 @@ Quotes made before a visitor's cookie existed (or after it expires, 7 days) can 
 `PATCH` deletes the quote's lines and then re-inserts them, without a savepoint. If the insert fails, the quote is left
 with no lines. The portal validates prices before calling Salesforce and keeps the cart client-side, so pressing
 **Update Quote** again restores the lines. A `Savepoint` / `Database.rollback` in the Apex would make it atomic.
+
+## AI assistant
+
+An "Ask AI" chat button (bottom-right) answers customer questions from the same live Salesforce catalog the store shows
+(products, prices, bundle components, attributes, attribute pricing and configurator rules) and knows what is in the cart.
+It runs on the server (`server/chat.js`, Anthropic SDK), so the key never reaches the browser. Set `ANTHROPIC_API_KEY`
+(and optionally `CHAT_MODEL`) to turn it on; without a key the button is hidden. In public mode each visitor address is
+limited to 40 assistant messages per hour. The assistant cannot change the cart or the quote.

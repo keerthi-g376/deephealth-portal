@@ -53,3 +53,15 @@ export const CheckIcon = (p) => (
     <path d="m5 12 5 5 9-10" />
   </svg>
 );
+export const SparkleIcon = (p) => (
+  <svg {...base} {...p}>
+    <path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8L12 3z" />
+    <path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8L19 15z" />
+  </svg>
+);
+export const SendIcon = (p) => (
+  <svg {...base} {...p}>
+    <path d="M22 2L11 13" />
+    <path d="M22 2l-7 20-4-9-9-4 20-7z" />
+  </svg>
+);

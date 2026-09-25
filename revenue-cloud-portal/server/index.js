@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { SfError, authMode, callQuoteApi, insertRecords } from './salesforce.js';
 import { getProducts } from './products.js';
 import { rateLimit, readQuoteIds, rememberQuote } from './guard.js';
+import { askAssistant, chatEnabled } from './chat.js';
 import { adjustedPrice } from '../src/pricing.js';
 
 // Public mode = the portal is exposed to the internet. On by default whenever real Salesforce
@@ -201,7 +202,7 @@ const quoteId = (req) => {
   return req.params.id;
 };
 
-app.get('/api/health', (_req, res) => res.json({ ok: true, auth: authMode() }));
+app.get('/api/health', (_req, res) => res.json({ ok: true, auth: authMode(), chat: chatEnabled() }));
 
 // Products (+ pricing, selling models, attributes, bundle components) for the storefront.
 app.get(
@@ -244,6 +245,18 @@ app.patch(
     const { body, lines } = await buildQuoteBody(req.body?.lineItems, { requireItems: false });
     const quote = await callQuoteApi('PATCH', id, body);
     res.json({ ...quote, structureSync: await syncStructure(quote, lines) });
+  }),
+);
+
+// AI shopping assistant: answers from the live Salesforce catalog. Each call costs money, so public mode
+// gives every visitor address a small hourly allowance on top of the general rate limit.
+app.post(
+  '/api/chat',
+  publicMode
+    ? rateLimit({ windowMs: 3_600_000, max: 40, message: 'You have reached the hourly limit for the assistant. Please try again later.' })
+    : (_req, _res, next) => next(),
+  wrap(async (req, res) => {
+    res.json({ reply: await askAssistant(req.body?.messages, req.body?.cart) });
   }),
 );
 

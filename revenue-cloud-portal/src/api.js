@@ -22,6 +22,8 @@ async function request(path, options = {}) {
 
 export const api = {
   getProducts: () => request('/api/products'),
+  health: () => request('/api/health'),
+  chat: (messages, cart) => request('/api/chat', { method: 'POST', body: JSON.stringify({ messages, cart }) }),
   getQuote: (id) => request(`/api/quotes/${id}`),
   createQuote: (lineItems) => request('/api/quotes', { method: 'POST', body: JSON.stringify({ lineItems }) }),
   updateQuote: (id, lineItems) =>
