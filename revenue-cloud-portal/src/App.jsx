@@ -6,6 +6,7 @@ import BundlePage from './components/BundlePage.jsx';
 import Cart from './components/Cart.jsx';
 import ConfigurePage from './components/ConfigurePage.jsx';
 import ProductCard from './components/ProductCard.jsx';
+import QuotePage from './components/QuotePage.jsx';
 import Toasts from './components/Toasts.jsx';
 import { BoxIcon, CartIcon, SearchIcon } from './components/icons.jsx';
 
@@ -23,7 +24,8 @@ function useCatalog() {
 }
 
 // Tiny hash router: "#/" = products, "#/configure/{id}" = configure product,
-// "#/bundle/{id}" = bundle components ("#/bundle/{outer}/{inner}" = a bundle opened from inside another).
+// "#/bundle/{id}" = bundle components ("#/bundle/{outer}/{inner}" = a bundle opened from inside another),
+// "#/quote" = details and products of the linked Salesforce quote.
 function useRoute() {
   const parse = () => {
     const [name = '', ...ids] = window.location.hash.replace(/^#\/?/, '').split('/').filter((s, i) => i === 0 || s);
@@ -84,11 +86,13 @@ function Storefront({ catalog }) {
   const chain = route.ids.map((id) => byId.get(id));
   const isBundleRoute = route.name === 'bundle';
   const isConfigureRoute = route.name === 'configure';
-  const onDetail = isBundleRoute || isConfigureRoute;
+  const isQuoteRoute = route.name === 'quote';
+  const onDetail = isBundleRoute || isConfigureRoute || isQuoteRoute;
 
   let detail = null;
   if (onDetail) {
-    if (catalog.status === 'loading') detail = <p className="state">Loading from Salesforce…</p>;
+    if (isQuoteRoute) detail = <QuotePage onBack={back} />;
+    else if (catalog.status === 'loading') detail = <p className="state">Loading from Salesforce…</p>;
     else if (catalog.status === 'error') detail = <p className="state error">{catalog.error}</p>;
     else if (
       !detailProduct ||
@@ -121,9 +125,9 @@ function Storefront({ catalog }) {
         </a>
         <div className="topbar-right">
           {cart.quote && (
-            <span className="quote-pill" title="The cart is linked to this Salesforce quote">
+            <a className="quote-pill" href="#/quote" title="View this quote's details and products">
               Quote #{cart.quote.quoteNumber} · {cart.quote.status}
-            </span>
+            </a>
           )}
           <button className="btn btn-cart" onClick={() => setCartOpen(true)}>
             <CartIcon />
