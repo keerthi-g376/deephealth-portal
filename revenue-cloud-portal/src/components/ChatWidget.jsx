@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { useCart } from '../cart.jsx';
+import { addFromChat } from '../chatActions.js';
 import { CloseIcon, SendIcon, SparkleIcon } from './icons.jsx';
 
 const SUGGESTIONS = ['What bundles do you offer?', 'What comes in the Center of Excellence bundle?', 'Help me choose products for a breast imaging clinic'];
@@ -41,7 +42,7 @@ function Answer({ text }) {
 }
 
 // AI shopping assistant. Shown only when the server has an Anthropic key configured (/api/health -> chat).
-export default function ChatWidget({ products = [] }) {
+export default function ChatWidget({ products = [], byId = new Map() }) {
   const cart = useCart();
   const { items } = cart;
   const [enabled, setEnabled] = useState(false);
@@ -78,17 +79,19 @@ export default function ChatWidget({ products = [] }) {
     setBusy(true);
     try {
       const { reply, actions = [] } = await api.chat(history, items.map(({ name, quantity }) => ({ name, quantity })));
-      // the assistant asked for products to be added: do it exactly like the card's Add button (only listed, priced products)
-      const byId = new Map(products.map((p) => [p.id, p]));
+      // the assistant asked for products to be added: do it the way the store's own pages do (only listed, priced products)
+      const listed = new Set(products.map((p) => p.id));
       const applied = [];
+      const failed = [];
       for (const a of actions) {
-        const product = byId.get(a.productId);
-        if (a.type !== 'add' || !product || product.unitPrice == null) continue;
-        cart.add(product, { quantity: a.quantity });
-        applied.push({ type: 'add', productId: product.id, quantity: a.quantity, name: product.name });
+        if (a.type !== 'add' || !listed.has(a.productId)) continue;
+        const result = addFromChat(cart, byId, a);
+        if (result?.added) applied.push({ type: 'add', productId: a.productId, name: byId.get(a.productId).name, ...result.added });
+        else if (result?.failed) failed.push(result.failed);
       }
       if (applied.length) cart.notify('success', `${applied.map((a) => a.name).join(', ')} added to the cart`);
-      setMessages((m) => [...m, { role: 'assistant', content: reply, actions: applied }]);
+      if (failed.length) cart.notify('info', failed.join(' '));
+      setMessages((m) => [...m, { role: 'assistant', content: reply, actions: applied, failed }]);
     } catch (err) {
       setMessages((m) => [...m, { role: 'error', content: err.message }]);
     } finally {
@@ -134,8 +137,19 @@ export default function ChatWidget({ products = [] }) {
               <div className={`chat-msg ${m.role}`} key={i}>
                 {m.role === 'assistant' ? <Answer text={m.content} /> : <p>{m.content}</p>}
                 {m.actions?.length > 0 && (
-                  <p className="chat-added">✓ Added to cart: {m.actions.map((a) => `${a.name}${a.quantity > 1 ? ` × ${a.quantity}` : ''}`).join(', ')}</p>
+                  <p className="chat-added">
+                    ✓ Added to cart:{' '}
+                    {m.actions
+                      .map(
+                        (a) =>
+                          `${a.name}${a.quantity > 1 ? ` × ${a.quantity}` : ''}${a.shown?.length ? ` (${a.shown.join(', ')})` : ''}${
+                            a.components?.length ? ` with ${a.components.join(', ')}` : ''
+                          }`,
+                      )
+                      .join('; ')}
+                  </p>
                 )}
+                {m.failed?.length > 0 && <p className="chat-added warn">{m.failed.join(' ')}</p>}
               </div>
             ))}
             {busy && (
