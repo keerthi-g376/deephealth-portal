@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { api } from './api.js';
-import { attributeKey, lineValuesByDefinitionId } from './attributes.js';
+import { attributeKey, lineValuesByDefinitionId, toLineAttributes, valuesByDefinitionId } from './attributes.js';
+import { applyConfigRules } from './configRules.js';
 import { adjustedPrice } from './pricing.js';
 
 const STORAGE_KEY = 'dh-portal-session-v1';
@@ -20,7 +21,7 @@ const lineIdOf = (productId, attributes, parentLineId = null) => {
 // Fingerprint of the cart content; lets us tell whether the cart differs from what Salesforce holds.
 export const signature = (items) =>
   items
-    .map((i) => `${i.lineId}:${i.quantity}`)
+    .map((i) => `${i.lineId}:${i.quantity}:${attributeKey(i.attributes)}`)
     .sort()
     .join('|');
 
@@ -68,6 +69,18 @@ function withLine(items, product, { quantity = 1, attributes = [], parentLineId 
     attributes,
   };
   return { items: [...items, line], lineId };
+}
+
+// Folds line `srcId` into the identical line `dstId`: quantities add up, and the source's components are merged
+// into the destination's matching components (or moved under it when the destination has none like them).
+function mergeLine(items, srcId, dstId) {
+  const src = items.find((i) => i.lineId === srcId);
+  let next = items.filter((i) => i.lineId !== srcId).map((i) => (i.lineId === dstId ? { ...i, quantity: clampQty(i.quantity + src.quantity) } : i));
+  for (const child of items.filter((i) => i.parentLineId === srcId)) {
+    const twin = next.find((i) => i.parentLineId === dstId && i.productId === child.productId && attributeKey(i.attributes) === attributeKey(child.attributes));
+    next = twin ? mergeLine(next, child.lineId, twin.lineId) : next.map((i) => (i.lineId === child.lineId ? { ...i, parentLineId: dstId } : i));
+  }
+  return next;
 }
 
 function reducer(state, action) {
@@ -124,6 +137,36 @@ function reducer(state, action) {
             : i;
         }),
       };
+    }
+    case 'setAttribute': {
+      // change one attribute value on a line (cart level = quote level): re-price it from Salesforce's attribute
+      // pricing and, for a bundle, let its auto-add rules bring in components the new value calls for
+      const { lineId, name, value, byId } = action;
+      const line = state.items.find((i) => i.lineId === lineId);
+      const product = line && byId?.get(line.productId);
+      const def = product?.attributes.find((a) => a.name === name);
+      if (!def || def.readOnly) return state;
+
+      const values = { ...Object.fromEntries(line.attributes.map((a) => [a.name, a.value])), [name]: value };
+      const attributes = toLineAttributes(product, values);
+      const byDefinition = valuesByDefinitionId(product, values);
+      const unitPrice = adjustedPrice(product, byDefinition);
+      let items = state.items.map((i) => (i.lineId === lineId ? { ...i, attributes, unitPrice: unitPrice ?? i.unitPrice } : i));
+
+      if (product.isBundle && product.configRules?.length) {
+        const present = new Set(items.filter((i) => i.parentLineId === lineId).map((i) => i.productId));
+        const addableIds = new Set(product.components.filter((c) => byId.get(c.productId)?.unitPrice != null).map((c) => c.productId));
+        for (const id of applyConfigRules(present, product.configRules, addableIds, byDefinition)) {
+          if (present.has(id)) continue;
+          ({ items } = withLine(items, byId.get(id), { quantity: product.components.find((c) => c.productId === id)?.quantity ?? 1, parentLineId: lineId }));
+        }
+      }
+
+      // the edit may make this line identical to another line of the same product in the same place: merge them
+      const key = attributeKey(attributes);
+      const twin = items.find((i) => i.lineId !== lineId && i.productId === line.productId && i.parentLineId === line.parentLineId && attributeKey(i.attributes) === key);
+      if (twin) items = mergeLine(items, lineId, twin.lineId);
+      return { ...state, items };
     }
     case 'quoteSaved':
       return { ...state, quote: action.quote, syncedSig: action.sig };
@@ -247,6 +290,7 @@ export function CartProvider({ children }) {
       // components: [{ product, quantity }] added under the last bundle of `chain`;
       // bundle: { attributes, unitPrice } for that last bundle when it was configured
       addToBundle: (chain, components, bundle) => dispatch({ type: 'addToBundle', chain, components, bundle }),
+      setAttribute: (lineId, name, value, byId) => dispatch({ type: 'setAttribute', lineId, name, value, byId }),
       setQty: (lineId, quantity) => dispatch({ type: 'setQty', lineId, quantity }),
       remove: (lineId) => dispatch({ type: 'remove', lineId }),
       clear: () => dispatch({ type: 'clear' }),

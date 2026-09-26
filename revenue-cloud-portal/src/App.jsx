@@ -192,7 +192,7 @@ function Storefront({ catalog }) {
         )}
       </main>
 
-      <Cart open={cartOpen} onClose={() => setCartOpen(false)} />
+      <Cart open={cartOpen} onClose={() => setCartOpen(false)} byId={byId} />
       {catalog.status === 'ready' && <ChatWidget products={products} byId={byId} />}
       <Toasts />
     </>

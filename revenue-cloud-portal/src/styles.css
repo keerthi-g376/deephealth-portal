@@ -241,3 +241,10 @@ a.quote-pill:hover { border-color: var(--cyan); }
 }
 .chat-msg p.chat-added { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); font-size: 0.8rem; color: var(--ok); }
 .chat-msg p.chat-added.warn { color: var(--warn); }
+
+/* ---- editing a cart line's attributes ---- */
+.line-edit { display: grid; gap: 8px; margin: 6px 0 2px; padding: 10px; border: 1px dashed var(--line); border-radius: 10px; }
+.line-attr { display: grid; grid-template-columns: 1fr 1fr; align-items: center; gap: 8px; font-size: 0.8rem; }
+.line-attr label:first-child { color: var(--cyan); }
+.line-attr .select, .line-attr .field { min-height: 34px; padding: 0 10px; font-size: 0.85rem; width: 100%; }
+.line-edit-btn { display: inline-flex; align-items: center; gap: 6px; width: fit-content; margin-top: 4px; font-size: 0.78rem; }

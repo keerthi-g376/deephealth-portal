@@ -1,11 +1,64 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useCart } from '../cart.jsx';
 import { money } from '../format.js';
-import { CloseIcon, TrashIcon } from './icons.jsx';
+import { CloseIcon, SlidersIcon, TrashIcon } from './icons.jsx';
 
-export default function Cart({ open, onClose }) {
+// One attribute of a cart line, editable in place.
+function LineAttribute({ attr, value, onChange }) {
+  const id = `line-attr-${attr.id}-${attr.name}`;
+  let control;
+  if (attr.dataType === 'Picklist') {
+    control = (
+      <select id={id} className="select" value={value} disabled={attr.readOnly} onChange={(e) => onChange(e.target.value)}>
+        <option value="">{attr.required ? 'Select…' : '— None —'}</option>
+        {attr.values.map((v) => (
+          <option key={v.code || v.value} value={v.value}>
+            {v.value}
+          </option>
+        ))}
+      </select>
+    );
+  } else if (attr.dataType === 'Checkbox') {
+    control = (
+      <label className="check">
+        <input id={id} type="checkbox" checked={value === 'true'} disabled={attr.readOnly} onChange={(e) => onChange(String(e.target.checked))} />
+        <span>{value === 'true' ? 'Yes' : 'No'}</span>
+      </label>
+    );
+  } else {
+    control = (
+      <input
+        id={id}
+        className="field text-field"
+        type={attr.dataType === 'Number' ? 'number' : 'text'}
+        value={value}
+        maxLength={attr.maxLength || undefined}
+        disabled={attr.readOnly}
+        onChange={(e) => onChange(e.target.value)}
+      />
+    );
+  }
+  return (
+    <div className="line-attr">
+      <label htmlFor={id}>
+        {attr.label}
+        {attr.required && <span className="req"> *</span>}
+      </label>
+      {control}
+    </div>
+  );
+}
+
+export default function Cart({ open, onClose, byId }) {
   const cart = useCart();
   const { items, quote, dirty, locked, saving } = cart;
+  const [editing, setEditing] = useState(() => new Set()); // lines whose attributes are open for editing
+  const toggleEditing = (lineId) =>
+    setEditing((s) => {
+      const next = new Set(s);
+      next.has(lineId) ? next.delete(lineId) : next.add(lineId);
+      return next;
+    });
 
   // Lines in display order: each bundle is followed by its components (indented), like the Salesforce quote.
   const ordered = useMemo(() => {
@@ -64,21 +117,43 @@ export default function Cart({ open, onClose }) {
             </p>
           ) : (
             <ul className="lines">
-              {ordered.map(({ line: i, depth, kids }) => (
+              {ordered.map(({ line: i, depth, kids }) => {
+                // a line can be edited when its product has attributes (and the quote can still be changed)
+                const product = byId?.get(i.productId);
+                const canEdit = !locked && (product?.attributes.length ?? 0) > 0;
+                return (
                 <li className={`line ${depth > 0 ? 'child' : ''}`} style={depth > 0 ? { marginLeft: depth * 18 } : undefined} key={i.lineId}>
                   <div className="line-info">
                     <strong>{i.name}</strong>
                     <small>
                       {i.code || i.family} · {money(i.unitPrice)} each
                     </small>
-                    {i.attributes.length > 0 && (
-                      <ul className="line-attrs">
-                        {i.attributes.map((a) => (
-                          <li key={a.name}>
-                            <span>{a.label}:</span> {a.display}
-                          </li>
+                    {editing.has(i.lineId) && product ? (
+                      <div className="line-edit">
+                        {product.attributes.map((a) => (
+                          <LineAttribute
+                            key={a.id}
+                            attr={a}
+                            value={i.attributes.find((x) => x.name === a.name)?.value ?? ''}
+                            onChange={(v) => cart.setAttribute(i.lineId, a.name, v, byId)}
+                          />
                         ))}
-                      </ul>
+                      </div>
+                    ) : (
+                      i.attributes.length > 0 && (
+                        <ul className="line-attrs">
+                          {i.attributes.map((a) => (
+                            <li key={a.name}>
+                              <span>{a.label}:</span> {a.display}
+                            </li>
+                          ))}
+                        </ul>
+                      )
+                    )}
+                    {canEdit && (
+                      <button className="link line-edit-btn" onClick={() => toggleEditing(i.lineId)}>
+                        <SlidersIcon width={14} height={14} /> {editing.has(i.lineId) ? 'Done' : 'Edit attributes'}
+                      </button>
                     )}
                   </div>
                   <div className="line-controls">
@@ -117,7 +192,8 @@ export default function Cart({ open, onClose }) {
                     </button>
                   </div>
                 </li>
-              ))}
+                );
+              })}
             </ul>
           )}
         </div>
