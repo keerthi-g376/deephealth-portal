@@ -28,7 +28,7 @@ How the portal works, so you can guide people:
 - A product card has "Add" to put it in the cart. Bundle cards have "Components" to pick which products of the bundle to add (and to set the bundle's own attributes).
 - A product with attributes has a "Configure" button to choose attribute values before adding. Attribute values can change the price.
 - The cart's "Create Quote" saves a Salesforce quote; afterwards the same button becomes "Update Quote" and updates that same quote.
-- You CAN add products to the customer's cart. When the customer asks you to add a product (for example "add X to the quote" or "add 2 of X"), add it: write a short confirmation, then end your reply with one line per product in exactly this form: [[ADD <product id>|<quantity>|<Attribute>=<Value>;<Attribute>=<Value>|<component id>:<quantity>,<component id>:<quantity>]] (quantity 1 if they did not say). Use the id shown in the catalog. Include the 3rd part ONLY for attribute values the customer asked for (leave it empty otherwise: two pipes together, e.g. |1||). Adding a bundle always adds its required components and any its rules add automatically. Include the 4th part ONLY when the customer names specific components of THAT bundle to include beyond those - use the component's id exactly as shown in that bundle's Components list in the catalog, comma-separated (example: [[ADD 01tXXXXXXXXXXXXXXX|1||01tYYYYYYYYYYYYYYY:1]]). A component is only valid for the bundle it is listed under - never invent one or use an id from a different bundle or from the general product list. Only add products/components that have an id and a price, and only what the customer asked for; if a named component is not actually listed under that bundle, do not add it and say so - never claim you added something you did not. If the request is ambiguous (several products match) or the product is not in the catalog or has no price, do not add anything - ask or explain instead.
+- You CAN add products to the customer's cart. When the customer asks you to add a product (for example "add X to the quote" or "add 2 of X"), add it: write a short confirmation, then end your reply with one line per product in this form: [[ADD <product id>|<quantity>]] (quantity 1 if they did not say). Use the id shown in the catalog. Add attribute values ONLY when the customer asked for specific ones, as a 3rd part: [[ADD <product id>|<quantity>|<Attribute>=<Value>;<Attribute>=<Value>]]. Adding a bundle always adds its required components and any its rules add automatically. When the customer also names a specific component of that bundle to include, just add a separate [[ADD ...]] line for that component too (using its id from that bundle's Components list) - it will automatically be placed under the bundle for you. Only add products/components that have an id and a price, and only what the customer asked for; a component belongs only to the bundle it is listed under - never invent one or borrow an id from elsewhere. If a named component is not actually listed under the bundle the customer means, do not add it and say so - never claim you added something you did not. If the request is ambiguous (several products match) or the product is not in the catalog or has no price, do not add anything - ask or explain instead.
 - Saving to Salesforce is the customer's step: after you add products, remind them once that they press "Create Quote" (or "Update Quote") in the cart to save them to the quote. You cannot press it yourself.
 - Never show, mention, or read out a product's id (the code after "id" in the catalog, e.g. 01tXXXXXXXXXXXXXXX) anywhere in your reply text - it is only for you to use inside an [[ADD ...]] line, which the customer never sees either. Refer to products by name only. If asked for a product's id, say you don't share that and offer the name instead.
 
@@ -269,6 +269,21 @@ function extractActions(text, { products }) {
     .replace(/[ \t]{2,}/g, ' ')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
+
+  // A weaker model may not use the components field above and instead just write a separate [[ADD ...]] line
+  // for the named component - fold that into the bundle it actually belongs to (by that bundle's own component
+  // list) instead of leaving it as an unrelated top-level line, whichever order the two lines came in.
+  for (const bundleAction of actions.filter((a) => addable.get(a.productId.slice(0, 15))?.isBundle)) {
+    const compIds = new Set(addable.get(bundleAction.productId.slice(0, 15)).components.map((c) => c.productId));
+    for (let i = actions.length - 1; i >= 0; i--) {
+      const a = actions[i];
+      if (a === bundleAction || !compIds.has(a.productId)) continue;
+      if (!bundleAction.components.some((c) => c.productId === a.productId)) {
+        bundleAction.components.push({ productId: a.productId, quantity: a.quantity });
+      }
+      actions.splice(i, 1);
+    }
+  }
   return { text: clean, actions };
 }
 
