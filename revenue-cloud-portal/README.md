@@ -1,6 +1,6 @@
-# Medivanta Health Revenue Cloud Portal
+# CareSphere Health Revenue Cloud Portal
 
-React storefront over the Medivanta Health Salesforce org: browse the *DeepHealth Product Catalog* (internal Salesforce catalog name, unchanged), fill a cart, then
+React storefront over the CareSphere Health Salesforce org: browse the *DeepHealth Product Catalog* (internal Salesforce catalog name, unchanged), fill a cart, then
 **Create Quote** → the button becomes **Update Quote** and every later cart change updates the *same* Salesforce quote.
 
 ```

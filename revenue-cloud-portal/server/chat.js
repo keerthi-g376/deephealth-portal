@@ -20,7 +20,7 @@ const CHAT_MODEL = () => process.env.CHAT_MODEL || 'openai/gpt-oss-20b';
 const MAX_MESSAGES = 12; // most recent turns sent to the model
 const MAX_CHARS = 600; // per user message
 
-const RULES = `You are the shopping assistant on the Medivanta Health Portal, a storefront where customers browse Medivanta Health products and build a quote.
+const RULES = `You are the shopping assistant on the CareSphere Health Portal, a storefront where customers browse CareSphere Health products and build a quote.
 
 Answer ONLY from the catalog below, which is read live from Salesforce. If something is not in the catalog (specifications, clinical claims, discounts, tax, delivery, contract terms, anything else), say you don't have that information - never guess or invent products, prices, features or availability.
 
@@ -135,7 +135,7 @@ const cartText = (cart) => {
   return `The customer's cart right now:\n${rows.join('\n')}`;
 };
 
-const REFUSAL_TEXT = "I can't help with that one. I can answer questions about the Medivanta Health products, prices and bundles though.";
+const REFUSAL_TEXT = "I can't help with that one. I can answer questions about the CareSphere Health products, prices and bundles though.";
 const NO_ANSWER = 'Sorry, I could not come up with an answer. Please try rephrasing your question.';
 const BUSY = 'The assistant is busy right now. Please try again in a moment.';
 
