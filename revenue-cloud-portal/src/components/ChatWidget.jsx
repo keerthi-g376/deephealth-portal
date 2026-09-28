@@ -113,7 +113,7 @@ export default function ChatWidget({ products = [], byId = new Map() }) {
           <header className="chat-head">
             <span className="chat-title">
               <SparkleIcon />
-              DeepHealth AI Assistant
+              Medivanta Health AI Assistant
             </span>
             <button className="icon-btn" onClick={() => setOpen(false)} aria-label="Close assistant">
               <CloseIcon />
@@ -122,7 +122,7 @@ export default function ChatWidget({ products = [], byId = new Map() }) {
 
           <div className="chat-body" ref={bodyRef} aria-live="polite">
             <div className="chat-msg assistant">
-              <p>Hi! I can help you explore DeepHealth products, bundles and pricing. What are you looking for?</p>
+              <p>Hi! I can help you explore Medivanta Health products, bundles and pricing. What are you looking for?</p>
             </div>
             {messages.length === 0 && (
               <div className="chat-suggest">

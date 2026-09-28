@@ -89,7 +89,7 @@ async function buildQuoteBody(rawItems, { requireItems }) {
       throw new SfError(`${where}.quantity must be a whole number between 1 and ${MAX_QTY}`, 400);
     }
     const product = catalog.get(productId);
-    if (!product) throw new SfError(`Product ${productId} is not in the DeepHealth Product Catalog`, 400);
+    if (!product) throw new SfError(`Product ${productId} is not in the Medivanta Health Product Catalog`, 400);
     if (product.unitPrice == null) throw new SfError(`"${product.name}" has no active price and cannot be quoted`, 400);
 
     const attributes = cleanAttributes(product, item?.attributes, where);

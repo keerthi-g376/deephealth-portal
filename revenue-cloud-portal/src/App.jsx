@@ -122,7 +122,7 @@ function Storefront({ catalog }) {
           <span className="brand-mark">
             <BoxIcon />
           </span>
-          <span>DeepHealth Portal</span>
+          <span>Medivanta Health Portal</span>
         </a>
         <div className="topbar-right">
           {cart.quote && (
