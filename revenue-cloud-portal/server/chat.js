@@ -28,7 +28,7 @@ How the portal works, so you can guide people:
 - A product card has "Add" to put it in the cart. Bundle cards have "Components" to pick which products of the bundle to add (and to set the bundle's own attributes).
 - A product with attributes has a "Configure" button to choose attribute values before adding. Attribute values can change the price.
 - The cart's "Create Quote" saves a Salesforce quote; afterwards the same button becomes "Update Quote" and updates that same quote.
-- You CAN add products to the customer's cart. When the customer asks you to add a product (for example "add X to the quote" or "add 2 of X"), add it: write a short confirmation, then end your reply with one line per product in exactly this form: [[ADD <product id>|<quantity>|<Attribute>=<Value>;<Attribute>=<Value>]] (quantity 1 if they did not say). Use the id shown in the catalog. Include the third part ONLY when the customer asks for specific attribute values (for example "with Risk Assessment = Yes"), using the attribute names and values exactly as the catalog lists them; leave it out otherwise (example without attributes: [[ADD 01tXXXXXXXXXXXXXXX|2]]; with: [[ADD 01tXXXXXXXXXXXXXXX|1|Risk Assessment=Yes;AI-powered Detection=Yes]]). Only add products that have an id and a price, and only what the customer asked for. If the request is ambiguous (several products match) or the product is not in the catalog or has no price, do not add anything - ask or explain instead. Adding a bundle also adds its required components and any components its rules add automatically (the same as the bundle's "Components" page with its default choices), and applies the attribute values, which can change the bundle's price - the bundle itself is added once; the customer can pick other components on the "Components" page.
+- You CAN add products to the customer's cart. When the customer asks you to add a product (for example "add X to the quote" or "add 2 of X"), add it: write a short confirmation, then end your reply with one line per product in exactly this form: [[ADD <product id>|<quantity>|<Attribute>=<Value>;<Attribute>=<Value>|<component id>:<quantity>,<component id>:<quantity>]] (quantity 1 if they did not say). Use the id shown in the catalog. Include the 3rd part ONLY for attribute values the customer asked for (leave it empty otherwise: two pipes together, e.g. |1||). Adding a bundle always adds its required components and any its rules add automatically. Include the 4th part ONLY when the customer names specific components of THAT bundle to include beyond those - use the component's id exactly as shown in that bundle's Components list in the catalog, comma-separated (example: [[ADD 01tXXXXXXXXXXXXXXX|1||01tYYYYYYYYYYYYYYY:1]]). A component is only valid for the bundle it is listed under - never invent one or use an id from a different bundle or from the general product list. Only add products/components that have an id and a price, and only what the customer asked for; if a named component is not actually listed under that bundle, do not add it and say so - never claim you added something you did not. If the request is ambiguous (several products match) or the product is not in the catalog or has no price, do not add anything - ask or explain instead.
 - Saving to Salesforce is the customer's step: after you add products, remind them once that they press "Create Quote" (or "Update Quote") in the cart to save them to the quote. You cannot press it yourself.
 - Never show, mention, or read out a product's id (the code after "id" in the catalog, e.g. 01tXXXXXXXXXXXXXXX) anywhere in your reply text - it is only for you to use inside an [[ADD ...]] line, which the customer never sees either. Refer to products by name only. If asked for a product's id, say you don't share that and offer the name instead.
 
@@ -76,7 +76,7 @@ function catalogText({ products, componentProducts }) {
         const child = byId.get(c.productId);
         if (!child) return null;
         const flags = [c.required && 'required', c.isDefault && 'default', c.priceIncluded && 'price included in bundle'].filter(Boolean);
-        return `${child.name} (${price(child)}${flags.length ? `; ${flags.join(', ')}` : ''}${c.group ? `; group ${c.group}` : ''})`;
+        return `${child.name} (id ${c.productId}; ${price(child)}${flags.length ? `; ${flags.join(', ')}` : ''}${c.group ? `; group ${c.group}` : ''})`;
       });
       lines.push(`  Components: ${comps.filter(Boolean).join('; ')}`);
     }
@@ -198,7 +198,7 @@ async function askClaude(system, messages) {
 // The model asks for a product to be added with [[ADD <id>|<quantity>]] lines. Only ids of products the storefront
 // lists with a price are accepted (anything else the model invents is dropped), at most 5 per reply, and the lines
 // are removed from the text the customer sees. The browser then adds them to the cart, exactly like the Add button.
-const ADD_LINE = /\[\[\s*ADD:?\s+([A-Za-z0-9]{15,18})\s*(?:\|\s*(\d{1,5}))?\s*(?:\|\s*([^\]]*?))?\s*\]\]/gi;
+const ADD_LINE = /\[\[\s*ADD:?\s+([A-Za-z0-9]{15,18})\s*(?:\|\s*(\d{1,5}))?\s*(?:\|([^|\]]*))?\s*(?:\|([^\]]*))?\s*\]\]/gi;
 
 // "Risk Assessment=Yes;AI-powered Detection=Yes" -> the product's own attributes with valid values
 // ([{ name, value }], name = the attribute's API name). Names match ignoring case and punctuation; values are
@@ -225,6 +225,22 @@ function resolveAttributes(product, raw) {
   return out;
 }
 
+// "01tYYY...:1,01tZZZ...:2" -> [{ productId, quantity }], accepted only when that id is actually one of THIS
+// bundle's own components (never another bundle's, and never invented) - the customer's requested quantity is
+// used when given, else the component's own default quantity.
+function resolveComponents(product, raw) {
+  if (!product.isBundle) return [];
+  const byId = new Map(product.components.map((c) => [c.productId.slice(0, 15), c]));
+  const out = [];
+  for (const part of String(raw ?? '').split(',').slice(0, 20)) {
+    const [idPart, qtyPart] = part.split(':');
+    const comp = byId.get(String(idPart ?? '').trim().slice(0, 15));
+    if (!comp || out.some((o) => o.productId === comp.productId)) continue;
+    out.push({ productId: comp.productId, quantity: Math.min(10000, Math.max(1, Number(qtyPart) || comp.quantity || 1)) });
+  }
+  return out;
+}
+
 // A model can ignore the "don't show ids" instruction and print a Salesforce id in its reply text
 // (id 01tXXXXXXXXXXXXXXX, "ID01tXXXXXXXXXXXXXXX", etc.) - stripped here so the customer never sees one,
 // whatever the model did.
@@ -234,7 +250,7 @@ function extractActions(text, { products }) {
   const addable = new Map(products.filter((p) => p.unitPrice != null).map((p) => [p.id.slice(0, 15), p]));
   const actions = [];
   const clean = text
-    .replace(ADD_LINE, (_, id, qty, attrs) => {
+    .replace(ADD_LINE, (_, id, qty, attrs, comps) => {
       const product = addable.get(id.slice(0, 15));
       if (product && actions.length < 5 && !actions.some((a) => a.productId === product.id)) {
         actions.push({
@@ -242,6 +258,7 @@ function extractActions(text, { products }) {
           productId: product.id,
           quantity: Math.min(10000, Math.max(1, Number(qty) || 1)),
           attributes: resolveAttributes(product, attrs),
+          components: resolveComponents(product, comps),
         });
       }
       return '';

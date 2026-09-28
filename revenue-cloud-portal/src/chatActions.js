@@ -30,11 +30,15 @@ export function addFromChat(cart, byId, action) {
   });
 
   if (product.isBundle) {
-    // default selection of the Components page: Required components, then the bundle's auto-add rules
+    // default selection of the Components page: Required components, then the bundle's auto-add rules,
+    // plus any specific components the customer named (already checked server-side against this bundle's own list)
     const addableIds = new Set(product.components.filter((c) => byId.get(c.productId)?.unitPrice != null).map((c) => c.productId));
-    const required = new Set(product.components.filter((c) => c.required && addableIds.has(c.productId)).map((c) => c.productId));
+    const requested = new Map((action.components ?? []).filter((c) => addableIds.has(c.productId)).map((c) => [c.productId, c.quantity]));
+    const required = new Set([...product.components.filter((c) => c.required && addableIds.has(c.productId)).map((c) => c.productId), ...requested.keys()]);
     const selected = applyConfigRules(required, product.configRules ?? [], addableIds, byDefinition);
-    const components = product.components.filter((c) => selected.has(c.productId)).map((c) => ({ product: byId.get(c.productId), quantity: c.quantity }));
+    const components = product.components
+      .filter((c) => selected.has(c.productId))
+      .map((c) => ({ product: byId.get(c.productId), quantity: requested.get(c.productId) ?? c.quantity }));
     cart.addToBundle([product], components, hasAttributes ? { attributes, unitPrice } : undefined);
     return { added: { quantity: 1, attributes: chosen, shown, components: components.map((c) => c.product.name) } };
   }
