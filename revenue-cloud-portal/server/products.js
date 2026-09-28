@@ -268,7 +268,7 @@ function normalize(p, picklists, currency, components, rulesByBundle, classifica
 }
 
 async function loadCatalog() {
-  const catalog = process.env.SF_CATALOG_NAME || 'DeepHealth Product Catalog';
+  const catalog = process.env.SF_CATALOG_NAME || 'CareSphere Health Product Catalog';
   const currency = process.env.SF_CURRENCY || 'USD';
 
   const catalogRows = await soql(
