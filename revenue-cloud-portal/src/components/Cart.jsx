@@ -1,6 +1,8 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useCart } from '../cart.jsx';
 import { money } from '../format.js';
+import Breadcrumb from './Breadcrumb.jsx';
+import Stepper from './Stepper.jsx';
 import { CloseIcon, SlidersIcon, TrashIcon } from './icons.jsx';
 
 // One attribute of a cart line, editable in place.
@@ -49,7 +51,8 @@ function LineAttribute({ attr, value, onChange }) {
   );
 }
 
-export default function Cart({ open, onClose, byId }) {
+// Everything inside the cart - used by both the pop-up (header Cart button) and the full "Your Cart" page.
+function CartContent({ byId }) {
   const cart = useCart();
   const { items, quote, dirty, locked, saving } = cart;
   const [editing, setEditing] = useState(() => new Set()); // lines whose attributes are open for editing
@@ -91,96 +94,78 @@ export default function Cart({ open, onClose, byId }) {
 
   return (
     <>
-      <div className={`scrim ${open ? 'show' : ''}`} onClick={onClose} />
-      <aside className={`drawer ${open ? 'open' : ''}`} aria-label="Shopping cart" aria-hidden={!open}>
-        <header className="drawer-head">
-          <h2>Your Cart</h2>
-          <button className="icon-btn" onClick={onClose} aria-label="Close cart">
-            <CloseIcon />
-          </button>
-        </header>
-
-        {quote && (
-          <div className={`quote-banner ${locked ? 'locked' : ''}`}>
-            <div>
-              <span className="muted">Salesforce Quote</span>
-              <strong>#{quote.quoteNumber}</strong>
-            </div>
-            <span className="status">{quote.status}</span>
+      {quote && (
+        <div className={`quote-banner ${locked ? 'locked' : ''}`}>
+          <div>
+            <span className="muted">Salesforce Quote</span>
+            <strong>#{quote.quoteNumber}</strong>
           </div>
-        )}
+          <span className="status">{quote.status}</span>
+        </div>
+      )}
 
-        <div className="drawer-body">
-          {items.length === 0 ? (
-            <p className="empty">
-              {quote ? 'The cart is empty. Updating will remove all products from the quote.' : 'Your cart is empty. Add products to get started.'}
-            </p>
-          ) : (
-            <ul className="lines">
-              {ordered.map(({ line: i, depth, kids }) => {
-                // a line can be edited when its product has attributes (and the quote can still be changed)
-                const product = byId?.get(i.productId);
-                const canEdit = !locked && (product?.attributes.length ?? 0) > 0;
-                return (
-                <li className={`line ${depth > 0 ? 'child' : ''}`} style={depth > 0 ? { marginLeft: depth * 18 } : undefined} key={i.lineId}>
-                  <div className="line-info">
-                    <strong>{i.name}</strong>
-                    <small>
-                      {i.code || i.family} · {money(i.unitPrice)} each
-                    </small>
-                    {editing.has(i.lineId) && product ? (
-                      <div className="line-edit">
-                        {product.attributes.map((a) => (
-                          <LineAttribute
-                            key={a.id}
-                            attr={a}
-                            value={i.attributes.find((x) => x.name === a.name)?.value ?? ''}
-                            onChange={(v) => cart.setAttribute(i.lineId, a.name, v, byId)}
-                          />
+      {items.length === 0 ? (
+        <p className="empty">
+          {quote ? 'The cart is empty. Updating will remove all products from the quote.' : 'Your cart is empty. Add products to get started.'}
+        </p>
+      ) : (
+        <ul className="lines">
+          {ordered.map(({ line: i, depth, kids }) => {
+            // a line can be edited when its product has attributes (and the quote can still be changed)
+            const product = byId?.get(i.productId);
+            const canEdit = !locked && (product?.attributes.length ?? 0) > 0;
+            return (
+              <li className={`line ${depth > 0 ? 'child' : ''}`} style={depth > 0 ? { marginLeft: depth * 18 } : undefined} key={i.lineId}>
+                <div className="line-info">
+                  <strong>{i.name}</strong>
+                  <small>
+                    {i.code || i.family} · {money(i.unitPrice)} each
+                  </small>
+                  {canEdit && (
+                    <button className="badge-outline line-edit-btn" onClick={() => toggleEditing(i.lineId)}>
+                      <SlidersIcon width={12} height={12} /> {editing.has(i.lineId) ? 'Done' : 'Edit attributes'}
+                    </button>
+                  )}
+                  {editing.has(i.lineId) && product ? (
+                    <div className="line-edit">
+                      {product.attributes.map((a) => (
+                        <LineAttribute
+                          key={a.id}
+                          attr={a}
+                          value={i.attributes.find((x) => x.name === a.name)?.value ?? ''}
+                          onChange={(v) => cart.setAttribute(i.lineId, a.name, v, byId)}
+                        />
+                      ))}
+                    </div>
+                  ) : (
+                    i.attributes.length > 0 && (
+                      <ul className="line-attrs">
+                        {i.attributes.map((a) => (
+                          <li key={a.name}>
+                            <span>{a.label}:</span> {a.display}
+                          </li>
                         ))}
-                      </div>
-                    ) : (
-                      i.attributes.length > 0 && (
-                        <ul className="line-attrs">
-                          {i.attributes.map((a) => (
-                            <li key={a.name}>
-                              <span>{a.label}:</span> {a.display}
-                            </li>
-                          ))}
-                        </ul>
-                      )
-                    )}
-                    {canEdit && (
-                      <button className="link line-edit-btn" onClick={() => toggleEditing(i.lineId)}>
-                        <SlidersIcon width={14} height={14} /> {editing.has(i.lineId) ? 'Done' : 'Edit attributes'}
-                      </button>
-                    )}
-                  </div>
-                  <div className="line-controls">
+                      </ul>
+                    )
+                  )}
+                </div>
+                <div className="line-controls">
+                  <span className="line-total">{money(i.unitPrice * i.quantity)}</span>
+                  <div className="line-actions">
                     {kids > 0 ? (
                       <span className="bundle-note">
                         Bundle · {kids} component{kids === 1 ? '' : 's'}
                       </span>
                     ) : (
-                      <div className="qty">
-                        <button onClick={() => cart.setQty(i.lineId, i.quantity - 1)} disabled={locked || i.quantity <= 1} aria-label="Decrease quantity">
-                          −
-                        </button>
-                        <input
-                          type="number"
-                          min="1"
-                          max="10000"
-                          value={i.quantity}
-                          disabled={locked}
-                          onChange={(e) => cart.setQty(i.lineId, e.target.value)}
-                          aria-label={`Quantity for ${i.name}`}
-                        />
-                        <button onClick={() => cart.setQty(i.lineId, i.quantity + 1)} disabled={locked} aria-label="Increase quantity">
-                          +
-                        </button>
-                      </div>
+                      <Stepper
+                        value={i.quantity}
+                        label={`quantity for ${i.name}`}
+                        minusDisabled={locked || i.quantity <= 1}
+                        plusDisabled={locked || i.quantity >= 10000}
+                        onMinus={() => cart.setQty(i.lineId, i.quantity - 1)}
+                        onPlus={() => cart.setQty(i.lineId, i.quantity + 1)}
+                      />
                     )}
-                    <span className="line-total">{money(i.unitPrice * i.quantity)}</span>
                     <button
                       className="icon-btn danger"
                       onClick={() => cart.remove(i.lineId)}
@@ -188,48 +173,87 @@ export default function Cart({ open, onClose, byId }) {
                       title={kids > 0 ? 'Remove the bundle and its components' : undefined}
                       aria-label={`Remove ${i.name}`}
                     >
-                      <TrashIcon />
+                      <TrashIcon width={16} height={16} />
                     </button>
                   </div>
-                </li>
-                );
-              })}
-            </ul>
-          )}
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+
+      <dl className="totals">
+        <div>
+          <dt>Subtotal</dt>
+          <dd>{money(cart.subtotal)}</dd>
         </div>
+        <div className="grand">
+          <dt>Total</dt>
+          <dd>{money(cart.total)}</dd>
+        </div>
+      </dl>
 
-        <footer className="drawer-foot">
-          <dl className="totals">
-            <div>
-              <dt>Subtotal</dt>
-              <dd>{money(cart.subtotal)}</dd>
-            </div>
-            <div className="grand">
-              <dt>Total</dt>
-              <dd>{money(cart.total)}</dd>
-            </div>
-          </dl>
+      {hint && <p className="hint">{hint}</p>}
 
-          {hint && <p className="hint">{hint}</p>}
-
-          <button className="btn btn-primary" disabled={!canSave} onClick={cart.saveQuote}>
-            {label}
+      <div className="cart-actions">
+        <button className="btn-coral block" disabled={!canSave} onClick={cart.saveQuote}>
+          {label}
+        </button>
+        {items.length > 0 && !locked && (
+          <button className="btn-outline block" onClick={cart.clear} disabled={saving}>
+            Clear cart
           </button>
-
-          <div className="foot-links">
-            {items.length > 0 && !locked && (
-              <button className="link" onClick={cart.clear} disabled={saving}>
-                Clear cart
-              </button>
-            )}
-            {quote && (
-              <button className="link" onClick={cart.startNewQuote} disabled={saving}>
-                Start a new quote
-              </button>
-            )}
-          </div>
-        </footer>
-      </aside>
+        )}
+        {quote && (
+          <button className="link center" onClick={cart.startNewQuote} disabled={saving}>
+            Start a new quote
+          </button>
+        )}
+      </div>
     </>
+  );
+}
+
+// Pop-up cart opened by the header Cart button.
+export default function Cart({ open, onClose, byId }) {
+  useEffect(() => {
+    if (!open) return undefined;
+    const onKey = (e) => e.key === 'Escape' && onClose();
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open, onClose]);
+  if (!open) return null;
+  return (
+    <div className="modal-scrim" onClick={onClose}>
+      <aside className="modal" role="dialog" aria-modal="true" aria-label="Shopping cart" onClick={(e) => e.stopPropagation()}>
+        <header className="modal-head">
+          <h2>Your Cart</h2>
+          <div className="modal-head-right">
+            <a className="link" href="#/cart" onClick={onClose}>
+              Open full page
+            </a>
+            <button className="icon-btn" onClick={onClose} aria-label="Close cart">
+              <CloseIcon />
+            </button>
+          </div>
+        </header>
+        <div className="modal-body">
+          <CartContent byId={byId} />
+        </div>
+      </aside>
+    </div>
+  );
+}
+
+// Full-page cart at #/cart.
+export function CartPage({ byId }) {
+  return (
+    <section className="detail">
+      <Breadcrumb current="Your Cart" />
+      <div className="cart-page">
+        <CartContent byId={byId} />
+      </div>
+    </section>
   );
 }

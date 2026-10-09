@@ -3,7 +3,9 @@ import { initialValues, missingRequired, toLineAttributes, valuesByDefinitionId 
 import { useCart } from '../cart.jsx';
 import { money, sellingModelLabel } from '../format.js';
 import { adjustedPrice } from '../pricing.js';
-import { ArrowLeftIcon, BoxIcon, CartIcon } from './icons.jsx';
+import Breadcrumb from './Breadcrumb.jsx';
+import Stepper from './Stepper.jsx';
+import { CartIcon } from './icons.jsx';
 
 export function AttributeField({ attr, value, onChange }) {
   const id = `attr-${attr.id}`;
@@ -71,33 +73,18 @@ export default function ConfigurePage({ product, onBack }) {
     cart.notify('success', `${product.name} added to the cart`);
   };
 
+  const term = product.sellingModels.length > 0 ? sellingModelLabel(product.sellingModels[0]) : '';
+
   return (
     <section className="detail">
-      <button className="back" onClick={onBack}>
-        <ArrowLeftIcon /> Back
-      </button>
+      <Breadcrumb current="Configure" />
 
-      <div className="detail-head">
-        <span className="detail-icon">
-          <BoxIcon width={30} height={30} />
-        </span>
-        <div>
-          <h1 className="title small">Configure Product</h1>
-          <p className="detail-sub">
-            <strong>{product.name}</strong>
-            {product.code && <> · {product.code}</>} · {product.family}
-          </p>
-          {product.sellingModels.length > 0 && (
-            <div className="chips">
-              {product.sellingModels.map((m, i) => (
-                <span className="chip" key={i}>
-                  {sellingModelLabel(m)}
-                </span>
-              ))}
-            </div>
-          )}
-        </div>
+      <div className="page-head">
+        <h1>{product.name}</h1>
+        {term && <span className="tag-pill tag-green">{term}</span>}
       </div>
+      <p className="detail-sub">{[product.code, product.family].filter(Boolean).join(' · ')}</p>
+      <p className="note">Choose the attribute values you want, then add the product to the cart.</p>
 
       <div className="panel">
         <h2>Attributes</h2>
@@ -106,16 +93,14 @@ export default function ConfigurePage({ product, onBack }) {
         ))}
 
         <div className="attr-field">
-          <label htmlFor="cfg-qty">Quantity</label>
-          <input
-            id="cfg-qty"
-            className="field text-field narrow"
-            type="number"
-            min="1"
-            max="10000"
-            value={qtyText}
-            onChange={(e) => setQtyText(e.target.value)}
-            onBlur={() => setQtyText(String(qty))}
+          <label>Quantity</label>
+          <Stepper
+            value={qty}
+            label="quantity"
+            minusDisabled={qty <= 1}
+            plusDisabled={qty >= 10000}
+            onMinus={() => setQtyText(String(qty - 1))}
+            onPlus={() => setQtyText(String(qty + 1))}
           />
         </div>
 
@@ -130,8 +115,8 @@ export default function ConfigurePage({ product, onBack }) {
               <small>No active price - this product cannot be quoted</small>
             )}
           </div>
-          <button className="btn btn-primary fit" disabled={!canAdd} onClick={add}>
-            <CartIcon /> Add
+          <button className="btn-soft fit" disabled={!canAdd} onClick={add}>
+            <CartIcon width={14} height={14} /> Add
           </button>
         </div>
         {priced && missing.length > 0 && <p className="hint left">Required: {missing.join(', ')}</p>}

@@ -65,3 +65,41 @@ export const SendIcon = (p) => (
     <path d="M22 2l-7 20-4-9-9-4 20-7z" />
   </svg>
 );
+export const BellIcon = (p) => (
+  <svg {...base} {...p}>
+    <path d="M6 9a6 6 0 1 1 12 0c0 6 2.5 7.5 2.5 7.5h-17S6 15 6 9Z" />
+    <path d="M10 20a2 2 0 0 0 4 0" />
+  </svg>
+);
+export const MinusIcon = (p) => (
+  <svg {...base} {...p}>
+    <path d="M5 12h14" />
+  </svg>
+);
+export const PlusIcon = (p) => (
+  <svg {...base} {...p}>
+    <path d="M12 5v14M5 12h14" />
+  </svg>
+);
+export const ChevronDownIcon = (p) => (
+  <svg {...base} {...p}>
+    <path d="m6 9 6 6 6-6" />
+  </svg>
+);
+export const ArrowRightIcon = (p) => (
+  <svg {...base} {...p}>
+    <path d="M5 12h14M13 6l6 6-6 6" />
+  </svg>
+);
+export const FilterIcon = (p) => (
+  <svg {...base} {...p}>
+    <path d="M3 5h18l-7 8v6l-4-2v-4L3 5Z" />
+  </svg>
+);
+export const ChatIcon = (p) => (
+  <svg {...base} {...p}>
+    <rect x="4" y="8" width="16" height="11" rx="3" />
+    <path d="M12 8V4.5M9 13h.01M15 13h.01M9.5 16h5" />
+    <circle cx="12" cy="3.5" r="1" />
+  </svg>
+);

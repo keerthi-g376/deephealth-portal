@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { useCart } from '../cart.jsx';
 import { money } from '../format.js';
-import { ArrowLeftIcon, BoxIcon } from './icons.jsx';
+import Breadcrumb from './Breadcrumb.jsx';
 
 const day = (s) => {
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s ?? '');
@@ -56,19 +56,12 @@ export default function QuotePage({ onBack }) {
 
   return (
     <section className="detail">
-      <button className="back" onClick={onBack}>
-        <ArrowLeftIcon /> Back
-      </button>
-
-      <div className="detail-head">
-        <span className="detail-icon">
-          <BoxIcon width={30} height={30} />
-        </span>
-        <div>
-          <h1 className="title small">Quote #{quote.quoteNumber}</h1>
-          <p className="detail-sub">Quote details and products · {quote.status}</p>
-        </div>
+      <Breadcrumb current={`Quote #${quote.quoteNumber}`} />
+      <div className="page-head">
+        <h1>Quote #{quote.quoteNumber}</h1>
+        <span className="tag-pill tag-green">{quote.status}</span>
       </div>
+      <p className="detail-sub">Quote details and products</p>
 
       {dirty && <p className="note warn">Your cart has changes that are not in this quote yet. Open the cart and choose Update Quote.</p>}
       {state.status === 'loading' && <p className="state">Loading the quote from Salesforce…</p>}

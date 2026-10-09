@@ -2,7 +2,7 @@ import { Fragment, useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { useCart } from '../cart.jsx';
 import { addFromChat } from '../chatActions.js';
-import { CloseIcon, SendIcon, SparkleIcon } from './icons.jsx';
+import { ChatIcon, CloseIcon, SendIcon, SparkleIcon } from './icons.jsx';
 
 const SUGGESTIONS = ['What bundles do you offer?', 'What comes in the Center of Excellence bundle?', 'Help me choose products for a breast imaging clinic'];
 
@@ -103,8 +103,7 @@ export default function ChatWidget({ products = [], byId = new Map() }) {
     <>
       {!open && (
         <button className="chat-fab" onClick={() => setOpen(true)} aria-label="Ask the AI assistant">
-          <SparkleIcon width={20} height={20} />
-          <span>Ask AI</span>
+          <ChatIcon width={24} height={24} />
         </button>
       )}
 

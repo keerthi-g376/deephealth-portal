@@ -3,13 +3,42 @@ import { api } from './api.js';
 import { isConfigurable } from './attributes.js';
 import { CartProvider, useCart } from './cart.jsx';
 import BundlePage from './components/BundlePage.jsx';
-import Cart from './components/Cart.jsx';
+import Cart, { CartPage } from './components/Cart.jsx';
 import ChatWidget from './components/ChatWidget.jsx';
 import ConfigurePage from './components/ConfigurePage.jsx';
 import ProductCard from './components/ProductCard.jsx';
 import QuotePage from './components/QuotePage.jsx';
 import Toasts from './components/Toasts.jsx';
-import { BoxIcon, CartIcon, SearchIcon } from './components/icons.jsx';
+import { ArrowRightIcon, BellIcon, CartIcon, ChevronDownIcon, FilterIcon, SearchIcon } from './components/icons.jsx';
+
+// Shown in the header's account chip. Static for now - there is no user login in the portal.
+const ACCOUNT = { initials: 'SP', name: 'Sri Padma' };
+
+const PRICE_RANGES = [
+  { id: 'any', label: 'Price Range', test: () => true },
+  { id: 'lt1k', label: 'Under $1,000', test: (p) => p < 1000 },
+  { id: '1k-10k', label: '$1,000 – $10,000', test: (p) => p >= 1000 && p <= 10000 },
+  { id: 'gt10k', label: 'Over $10,000', test: (p) => p > 10000 },
+];
+const SORTS = [
+  { id: 'default', label: 'Sort by', cmp: null },
+  { id: 'name', label: 'Name (A–Z)', cmp: (a, b) => a.name.localeCompare(b.name) },
+  { id: 'price-asc', label: 'Price: low to high', cmp: (a, b) => (a.unitPrice ?? Infinity) - (b.unitPrice ?? Infinity) },
+  { id: 'price-desc', label: 'Price: high to low', cmp: (a, b) => (b.unitPrice ?? -Infinity) - (a.unitPrice ?? -Infinity) },
+];
+const PAGE_SIZES = [8, 12, 24, 48];
+
+// A filter chip: a native <select> dressed as a pill (keeps keyboard + mobile behaviour for free).
+function Chip({ value, onChange, children, solid = false, label }) {
+  return (
+    <label className={`chip-select ${solid ? 'solid' : ''}`}>
+      <select value={value} onChange={(e) => onChange(e.target.value)} aria-label={label}>
+        {children}
+      </select>
+      <ChevronDownIcon width={12} height={12} />
+    </label>
+  );
+}
 
 function useCatalog() {
   const [state, setState] = useState({ status: 'loading', products: [], componentProducts: [], error: '' });
@@ -55,7 +84,12 @@ function Storefront({ catalog }) {
   const { route, back } = useRoute();
   const [query, setQuery] = useState('');
   const [family, setFamily] = useState('All');
+  const [priceRange, setPriceRange] = useState('any');
+  const [sort, setSort] = useState('default');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(PAGE_SIZES[0]);
   const [cartOpen, setCartOpen] = useState(false);
+  const closeCart = useCallback(() => setCartOpen(false), []);
   const { products, componentProducts } = catalog;
 
   // Every product that can be shown or quoted: the catalog plus bundle children outside it.
@@ -76,23 +110,47 @@ function Storefront({ catalog }) {
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return products.filter(
+    const inRange = PRICE_RANGES.find((r) => r.id === priceRange).test;
+    const list = products.filter(
       (p) =>
         (family === 'All' || p.family === family) &&
+        (priceRange === 'any' || (p.unitPrice != null && inRange(p.unitPrice))) &&
         (!q || [p.name, p.code, p.family, p.description].some((v) => v?.toLowerCase().includes(q))),
     );
-  }, [products, query, family]);
+    const cmp = SORTS.find((x) => x.id === sort).cmp;
+    return cmp ? [...list].sort(cmp) : list;
+  }, [products, query, family, priceRange, sort]);
+
+  const pages = Math.max(1, Math.ceil(visible.length / pageSize));
+  const currentPage = Math.min(page, pages);
+  const from = (currentPage - 1) * pageSize;
+  const pageItems = visible.slice(from, from + pageSize);
+  const activeFilters = (family !== 'All') + (priceRange !== 'any') + (sort !== 'default');
+  const resetFilters = () => {
+    setQuery('');
+    setFamily('All');
+    setPriceRange('any');
+    setSort('default');
+    setPage(1);
+  };
+  const pageNumbers = useMemo(() => {
+    // 1 … current-1 current current+1 … last
+    const set = new Set([1, pages, currentPage - 1, currentPage, currentPage + 1].filter((n) => n >= 1 && n <= pages));
+    return [...set].sort((a, b) => a - b);
+  }, [pages, currentPage]);
 
   const detailProduct = byId.get(route.id);
   const chain = route.ids.map((id) => byId.get(id));
   const isBundleRoute = route.name === 'bundle';
   const isConfigureRoute = route.name === 'configure';
   const isQuoteRoute = route.name === 'quote';
-  const onDetail = isBundleRoute || isConfigureRoute || isQuoteRoute;
+  const isCartRoute = route.name === 'cart';
+  const onDetail = isBundleRoute || isConfigureRoute || isQuoteRoute || isCartRoute;
 
   let detail = null;
   if (onDetail) {
     if (isQuoteRoute) detail = <QuotePage onBack={back} />;
+    else if (isCartRoute) detail = <CartPage byId={byId} />;
     else if (catalog.status === 'loading') detail = <p className="state">Loading from Salesforce…</p>;
     else if (catalog.status === 'error') detail = <p className="state error">{catalog.error}</p>;
     else if (
@@ -118,11 +176,9 @@ function Storefront({ catalog }) {
   return (
     <>
       <header className="topbar">
-        <a className="brand" href="#/">
-          <span className="brand-mark">
-            <BoxIcon />
-          </span>
-          <span>CareSphere Health Portal</span>
+        <a className="brand" href="#/" aria-label="CareSphere Health Portal - home">
+          <span className="brand-name">CareSphere</span>
+          <span className="brand-sub">Health Portal</span>
         </a>
         <div className="topbar-right">
           {cart.quote && (
@@ -130,11 +186,21 @@ function Storefront({ catalog }) {
               Quote #{cart.quote.quoteNumber} · {cart.quote.status}
             </a>
           )}
-          <button className="btn btn-cart" onClick={() => setCartOpen(true)}>
-            <CartIcon />
+          <button className="cart-pill" onClick={() => setCartOpen(true)}>
+            <CartIcon width={16} height={16} />
             Cart
-            {cart.count > 0 && <span className="count">{cart.count}</span>}
+            <span className="count">{cart.count}</span>
           </button>
+          <button className="bell" aria-label="Notifications">
+            <BellIcon width={18} height={18} />
+          </button>
+          <div className="account" title="Signed-in account">
+            <span className="avatar">{ACCOUNT.initials}</span>
+            <span className="account-text">
+              <small>MY ACCOUNT</small>
+              <strong>{ACCOUNT.name}</strong>
+            </span>
+          </div>
         </div>
       </header>
 
@@ -143,40 +209,60 @@ function Storefront({ catalog }) {
           detail
         ) : (
           <>
-            <h1 className="title">Products</h1>
-
-            <div className="stat">
-              <span className="stat-icon">
-                <BoxIcon />
-              </span>
-              <div>
-                <strong>{catalog.status === 'ready' ? products.length : '–'}</strong>
-                <small>Total Products</small>
-              </div>
+            <div className="title-row">
+              <h1 className="title">Products</h1>
+              <button className="view-all" onClick={resetFilters}>
+                View all products <ArrowRightIcon width={14} height={14} />
+              </button>
             </div>
 
             <div className="toolbar">
               <label className="search">
-                <SearchIcon />
+                <SearchIcon width={16} height={16} />
                 <input
                   type="search"
-                  placeholder="Search products by name, category, code or SKU…"
+                  placeholder="Search products..."
                   value={query}
-                  onChange={(e) => setQuery(e.target.value)}
+                  onChange={(e) => {
+                    setQuery(e.target.value);
+                    setPage(1);
+                  }}
                 />
               </label>
-              <select className="select" value={family} onChange={(e) => setFamily(e.target.value)} aria-label="Filter by category">
-                {families.map((f) => (
-                  <option key={f}>{f}</option>
-                ))}
-              </select>
+              <div className="chip-row">
+                <Chip solid label="Filter by category" value={family} onChange={(v) => { setFamily(v); setPage(1); }}>
+                  {families.map((f) => (
+                    <option key={f} value={f}>
+                      {f === 'All' ? 'All Categories' : f}
+                    </option>
+                  ))}
+                </Chip>
+                <Chip label="Filter by price range" value={priceRange} onChange={(v) => { setPriceRange(v); setPage(1); }}>
+                  {PRICE_RANGES.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.label}
+                    </option>
+                  ))}
+                </Chip>
+                <Chip label="Sort products" value={sort} onChange={(v) => { setSort(v); setPage(1); }}>
+                  {SORTS.map((x) => (
+                    <option key={x.id} value={x.id}>
+                      {x.label}
+                    </option>
+                  ))}
+                </Chip>
+                <button className="filters-btn" onClick={resetFilters} disabled={activeFilters === 0} title="Clear all filters">
+                  <FilterIcon width={13} height={13} /> Filters
+                  {activeFilters > 0 && <span className="count">{activeFilters}</span>}
+                </button>
+              </div>
             </div>
 
             {catalog.status === 'loading' && <p className="state">Loading products from Salesforce…</p>}
             {catalog.status === 'error' && (
               <div className="state error">
                 <p>{catalog.error}</p>
-                <button className="btn btn-primary" onClick={catalog.reload}>
+                <button className="btn-coral" onClick={catalog.reload}>
                   Retry
                 </button>
               </div>
@@ -184,15 +270,55 @@ function Storefront({ catalog }) {
             {catalog.status === 'ready' && visible.length === 0 && <p className="state">No products match your search.</p>}
 
             <div className="grid">
-              {visible.map((p) => (
+              {pageItems.map((p) => (
                 <ProductCard key={p.id} product={p} />
               ))}
             </div>
+
+            {catalog.status === 'ready' && visible.length > 0 && (
+              <footer className="pager">
+                <span className="pager-count">
+                  Showing {from + 1}–{from + pageItems.length} of {visible.length} products
+                </span>
+                {pages > 1 && (
+                  <nav className="pager-pages" aria-label="Pagination">
+                    <button onClick={() => setPage(currentPage - 1)} disabled={currentPage === 1} aria-label="Previous page">
+                      ‹
+                    </button>
+                    {pageNumbers.map((n, i) => (
+                      <span key={n} className="pager-slot">
+                        {i > 0 && n - pageNumbers[i - 1] > 1 && <span className="pager-gap">…</span>}
+                        <button className={n === currentPage ? 'on' : ''} onClick={() => setPage(n)} aria-current={n === currentPage ? 'page' : undefined}>
+                          {n}
+                        </button>
+                      </span>
+                    ))}
+                    <button onClick={() => setPage(currentPage + 1)} disabled={currentPage === pages} aria-label="Next page">
+                      ›
+                    </button>
+                  </nav>
+                )}
+                <label className="pager-size">
+                  Items per page
+                  <select
+                    value={pageSize}
+                    onChange={(e) => {
+                      setPageSize(Number(e.target.value));
+                      setPage(1);
+                    }}
+                  >
+                    {PAGE_SIZES.map((n) => (
+                      <option key={n}>{n}</option>
+                    ))}
+                  </select>
+                </label>
+              </footer>
+            )}
           </>
         )}
       </main>
 
-      <Cart open={cartOpen} onClose={() => setCartOpen(false)} byId={byId} />
+      <Cart open={cartOpen} onClose={closeCart} byId={byId} />
       {catalog.status === 'ready' && <ChatWidget products={products} byId={byId} />}
       <Toasts />
     </>

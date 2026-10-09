@@ -5,7 +5,9 @@ import { applyConfigRules, requiredByRules } from '../configRules.js';
 import { money, sellingModelLabel } from '../format.js';
 import { adjustedPrice } from '../pricing.js';
 import { AttributeField } from './ConfigurePage.jsx';
-import { ArrowLeftIcon, CartIcon, LayersIcon, SlidersIcon } from './icons.jsx';
+import Breadcrumb from './Breadcrumb.jsx';
+import Stepper from './Stepper.jsx';
+import { CartIcon, LayersIcon, SlidersIcon } from './icons.jsx';
 
 const clamp = (n, lo, hi) => Math.min(hi, Math.max(lo, Math.floor(Number(n)) || lo));
 
@@ -93,32 +95,19 @@ export default function BundlePage({ product, chain, byId, onBack }) {
     cart.notify('success', `${chosen.length} product${chosen.length === 1 ? '' : 's'} added to the cart under ${product.name}`);
   };
 
-  return (
-    <section className="detail">
-      <button className="back" onClick={onBack}>
-        <ArrowLeftIcon /> Back
-      </button>
+  const term = product.sellingModels.length > 0 ? sellingModelLabel(product.sellingModels[0]) : '';
 
-      <div className="detail-head">
-        <span className="detail-icon">
-          <LayersIcon width={30} height={30} />
-        </span>
-        <div>
-          <h1 className="title small">{product.name}</h1>
-          <p className="detail-sub">
-            Bundle{product.code && <> · {product.code}</>} · {rows.length} component{rows.length === 1 ? '' : 's'}
-          </p>
-          {product.sellingModels.length > 0 && (
-            <div className="chips">
-              {product.sellingModels.map((m, i) => (
-                <span className="chip" key={i}>
-                  {sellingModelLabel(m)}
-                </span>
-              ))}
-            </div>
-          )}
-        </div>
+  return (
+    <section className="detail wide">
+      <Breadcrumb current="Components" />
+
+      <div className="page-head">
+        <h1>{product.name}</h1>
+        {term && <span className="tag-pill tag-green">{term}</span>}
       </div>
+      <p className="detail-sub">
+        {[product.code, 'Bundle', `${rows.length} component${rows.length === 1 ? '' : 's'}`].filter(Boolean).join(' · ')}
+      </p>
 
       <p className="note">
         Select the products you want. They are added to the cart nested under {product.name}, each at its own standard price.
@@ -145,7 +134,7 @@ export default function BundlePage({ product, chain, byId, onBack }) {
 
       {groups.map((g) => (
         <div className="panel" key={g.name}>
-          <h2>{g.name}</h2>
+          <h2 className="group-title">{g.name}</h2>
           <ul className="comps">
             {g.rows.map((r) => {
               const c = r.child;
@@ -153,6 +142,8 @@ export default function BundlePage({ product, chain, byId, onBack }) {
               const locked = lockedByRule.has(r.productId);
               const lo = r.min ?? 1;
               const hi = r.max ?? 10000;
+              const q = qtyOf(r);
+              const setQ = (n) => setQtys((s) => ({ ...s, [r.productId]: clamp(n, lo, hi) }));
               return (
                 <li className={`comp ${priced ? '' : 'unavailable'}`} key={r.productId}>
                   <input
@@ -167,33 +158,31 @@ export default function BundlePage({ product, chain, byId, onBack }) {
                     <strong>{c.name}</strong>
                     <small>{[c.code, c.family].filter(Boolean).join(' · ')}</small>
                     <div className="tags">
-                      {r.required && <span className="tag tag-req">Required</span>}
-                      {locked && <span className="tag tag-req">Required by rule</span>}
-                      {r.isDefault && <span className="tag">Default</span>}
-                      {r.priceIncluded && <span className="tag">Price included in bundle</span>}
-                      {c.isBundle && <span className="tag tag-bundle">Bundle</span>}
+                      {r.required && <span className="tag-pill tag-red">Required</span>}
+                      {locked && <span className="tag-pill tag-red">Required by rule</span>}
+                      {r.isDefault && <span className="tag-pill tag-dark">Default</span>}
+                      {r.priceIncluded && <span className="tag-pill tag-plain">Price included in bundle</span>}
+                      {c.isBundle && <span className="tag-pill tag-plain">Bundle</span>}
                     </div>
                   </div>
                   <div className="comp-price">{priced ? money(c.unitPrice, c.currency) : <small>No active price</small>}</div>
-                  <input
-                    type="number"
-                    className="field text-field qty-field"
-                    min={lo}
-                    max={hi}
-                    value={qtyOf(r)}
-                    disabled={!r.quantityEditable || !priced}
-                    onChange={(e) => setQtys((q) => ({ ...q, [r.productId]: clamp(e.target.value, lo, hi) }))}
-                    aria-label={`Quantity for ${c.name}`}
+                  <Stepper
+                    value={q}
+                    label={`quantity for ${c.name}`}
+                    minusDisabled={!r.quantityEditable || !priced || q <= lo}
+                    plusDisabled={!r.quantityEditable || !priced || q >= hi}
+                    onMinus={() => setQ(q - 1)}
+                    onPlus={() => setQ(q + 1)}
                   />
                   <div className="comp-actions">
                     {c.isBundle && !chain.some((b) => b.id === c.id) && (
                       <a className="icon-btn" href={`#/bundle/${chainPath}/${c.id}`} title="View the components of this bundle" aria-label={`Components of ${c.name}`}>
-                        <LayersIcon />
+                        <LayersIcon width={16} height={16} />
                       </a>
                     )}
                     {isConfigurable(c) && (
                       <a className="icon-btn" href={`#/configure/${c.id}`} title="Configure attributes" aria-label={`Configure ${c.name}`}>
-                        <SlidersIcon />
+                        <SlidersIcon width={16} height={16} />
                       </a>
                     )}
                   </div>
@@ -209,8 +198,8 @@ export default function BundlePage({ product, chain, byId, onBack }) {
           <button className="link" onClick={() => setSelected(new Set(selected.size === addable.length ? [] : addable.map((r) => r.productId)))}>
             {selected.size === addable.length ? 'Clear selection' : 'Select all'}
           </button>
-          <button className="btn btn-primary fit" disabled={selected.size === 0 || !!unpricedBundle || missingAttrs.length > 0} onClick={addSelected}>
-            <CartIcon /> Add selected to cart ({selected.size})
+          <button className="btn-coral fit" disabled={selected.size === 0 || !!unpricedBundle || missingAttrs.length > 0} onClick={addSelected}>
+            <CartIcon width={14} height={14} /> Add selected to cart ({selected.size})
           </button>
         </div>
       )}
