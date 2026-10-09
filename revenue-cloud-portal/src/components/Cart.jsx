@@ -83,6 +83,22 @@ function CartContent({ byId }) {
     return out;
   }, [items]);
 
+  // A bundle has no price of its own in the cart: it shows the total of its components (0 until some are added),
+  // and the cart total counts only the components.
+  const { lineTotal, shownTotal } = useMemo(() => {
+    const kidsOf = new Map();
+    for (const { line } of ordered) if (line.parentLineId) kidsOf.set(line.parentLineId, [...(kidsOf.get(line.parentLineId) ?? []), line]);
+    const total = (line) => {
+      if (byId?.get(line.productId)?.isBundle) return (kidsOf.get(line.lineId) ?? []).reduce((n, k) => n + total(k), 0);
+      return line.unitPrice * line.quantity;
+    };
+    const ids = new Set(ordered.map((o) => o.line.lineId));
+    return {
+      lineTotal: total,
+      shownTotal: ordered.filter((o) => !o.line.parentLineId || !ids.has(o.line.parentLineId)).reduce((n, o) => n + total(o.line), 0),
+    };
+  }, [ordered, byId]);
+
   const isUpdate = !!quote && !locked;
   const label = saving ? (quote ? 'Updating…' : 'Creating…') : isUpdate ? 'Update Quote' : 'Create Quote';
   const canSave = !saving && !locked && (quote ? dirty : items.length > 0);
@@ -119,7 +135,7 @@ function CartContent({ byId }) {
                 <div className="line-info">
                   <strong>{i.name}</strong>
                   <small>
-                    {i.code || i.family} · {money(i.unitPrice)} each
+                    {i.code || i.family}{product?.isBundle ? '' : ` · ${money(i.unitPrice)} each`}
                   </small>
                   {canEdit && (
                     <button className="badge-outline line-edit-btn" onClick={() => toggleEditing(i.lineId)}>
@@ -150,7 +166,7 @@ function CartContent({ byId }) {
                   )}
                 </div>
                 <div className="line-controls">
-                  <span className="line-total">{money(i.unitPrice * i.quantity)}</span>
+                  <span className="line-total">{money(lineTotal(i))}</span>
                   <div className="line-actions">
                     {kids > 0 ? (
                       <span className="bundle-note">
@@ -186,11 +202,11 @@ function CartContent({ byId }) {
       <dl className="totals">
         <div>
           <dt>Subtotal</dt>
-          <dd>{money(cart.subtotal)}</dd>
+          <dd>{money(shownTotal)}</dd>
         </div>
         <div className="grand">
           <dt>Total</dt>
-          <dd>{money(cart.total)}</dd>
+          <dd>{money(shownTotal)}</dd>
         </div>
       </dl>
 
