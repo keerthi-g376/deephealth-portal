@@ -1,6 +1,2 @@
-Product images (public domain / CC0, from Wikimedia Commons). No attribution required; sources recorded here.
-lung.png         "CT of lung infarction with reverse halo sign.png" (CC0)
-pelvis.jpg       "T2 weighted MRI of inguinal hernia.jpg" (CC0)  - pelvic MRI
-workstation.jpg  "US Navy 051128-N-2115M-047 ... Radiology department looks over a x-ray.jpg" (public domain, US Navy)
-suite.jpg        "Interventional radiology A.jpg" (public domain)
-Replace with your own brand photography when available.
+Product images are DeepHealth marketing visuals copied from https://deephealth.com (product pages: Enterprise Imaging, Breast/Chest/Neuro/Prostate Suite).
+Used for the CareSphere demo portal; replace with licensed brand assets before any public launch.
