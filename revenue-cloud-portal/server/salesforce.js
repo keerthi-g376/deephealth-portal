@@ -160,7 +160,9 @@ const cliTransport = {
 const transport = () => (authMode() === 'client_credentials' ? oauthTransport : cliTransport);
 
 export const soql = (query) => transport().soql(query);
-export const callQuoteApi = (method, id, body) => transport().apex(method, quotePath(id), body);
+export const callLeadApi = (body) => transport().apex('POST', '/services/apexrest/portal/leads', body);
+export const callQuoteApi = (method, id, body, query = '') => transport().apex(method, quotePath(id) + query, body);
+export const callCustomerApi = (action, body) => transport().apex('POST', `/services/apexrest/portal/customer/${action}`, body);
 
 // Creates records of any sobject type in one standard REST call (composite sobjects), all or nothing.
 // records: [{ type, fields }]. Used to add the bundle structure and attribute values that the

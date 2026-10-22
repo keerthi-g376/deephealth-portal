@@ -1,22 +1,14 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { api } from './api.js';
-import { attributeKey, lineValuesByDefinitionId, toLineAttributes, valuesByDefinitionId } from './attributes.js';
+import { attributeKey, lineIdOf, lineValuesByDefinitionId, toLineAttributes, valuesByDefinitionId } from './attributes.js';
 import { applyConfigRules } from './configRules.js';
+import { getDisplayCurrency } from './format.js';
 import { adjustedPrice } from './pricing.js';
 
 const STORAGE_KEY = 'dh-portal-session-v1';
 const MAX_QTY = 10000;
-// The Salesforce API only allows changing line items while the quote is in one of these statuses.
-const EDITABLE_STATUSES = ['Draft', 'Pending'];
-
-// A cart line is a product plus its attribute choices. A product added without any
-// configuration keeps the plain product id as its line id, exactly as before.
-// A component added under a bundle is a different line from the same product added on its own.
-const lineIdOf = (productId, attributes, parentLineId = null) => {
-  const key = attributeKey(attributes);
-  const own = key ? `${productId}|${key}` : productId;
-  return parentLineId ? `${parentLineId}>${own}` : own;
-};
+// A customer can change a quote's lines only while it is a Draft; later stages are changed by revising (a new quote).
+const EDITABLE_STATUSES = ['Draft'];
 
 // Fingerprint of the cart content; lets us tell whether the cart differs from what Salesforce holds.
 export const signature = (items) =>
@@ -25,7 +17,7 @@ export const signature = (items) =>
     .sort()
     .join('|');
 
-const emptyState = { items: [], quote: null, syncedSig: null };
+const emptyState = { items: [], quote: null, syncedSig: null, reviseFrom: null };
 
 // Cart + linked Salesforce quote live in sessionStorage, so a page refresh keeps the
 // quote link and later cart changes still update the SAME quote.
@@ -169,11 +161,15 @@ function reducer(state, action) {
       return { ...state, items };
     }
     case 'quoteSaved':
-      return { ...state, quote: action.quote, syncedSig: action.sig };
+      return { ...state, quote: action.quote, syncedSig: action.sig, reviseFrom: null };
+    case 'loadQuote': // a customer's existing quote becomes the cart (linked, so Update changes the same quote)
+      return { items: action.items, quote: action.quote, syncedSig: signature(action.items), reviseFrom: null };
+    case 'loadRevision': // its lines become a cart for a NEW quote on the same Opportunity
+      return { items: action.items, quote: null, syncedSig: null, reviseFrom: action.reviseFrom };
     case 'quoteRefreshed':
       return state.quote ? { ...state, quote: { ...state.quote, ...action.quote } } : state;
     case 'detachQuote':
-      return { ...state, quote: null, syncedSig: null };
+      return { ...state, quote: null, syncedSig: null, reviseFrom: null };
     default:
       return state;
   }
@@ -242,7 +238,7 @@ export function CartProvider({ children }) {
     if (savingRef.current) return;
     savingRef.current = true;
     setSaving(true);
-    const { items, quote } = stateRef.current;
+    const { items, quote, reviseFrom } = stateRef.current;
     const lineItems = items.map(({ lineId, parentLineId, productId, quantity, unitPrice, attributes }) => ({
       lineId,
       parentLineId,
@@ -252,7 +248,7 @@ export function CartProvider({ children }) {
       attributes: attributes.map(({ name, value }) => ({ name, value })),
     }));
     try {
-      const saved = quote ? await api.updateQuote(quote.id, lineItems) : await api.createQuote(lineItems);
+      const saved = quote ? await api.updateQuote(quote.id, lineItems) : await api.createQuote(lineItems, { currency: getDisplayCurrency(), reviseFrom });
       if (!saved?.id) throw new Error('Salesforce did not return a quote id');
       dispatch({ type: 'quoteSaved', quote: summarize(saved), sig: signature(items) });
       notify('success', quote ? `Quote ${saved.quoteNumber} updated` : `Quote ${saved.quoteNumber} created`);
@@ -260,6 +256,7 @@ export function CartProvider({ children }) {
         notify('info', 'The quote was saved, but its bundle structure / attribute values could not be written to Salesforce.');
       }
     } catch (err) {
+      if (err.status === 401) window.dispatchEvent(new Event('dh-auth-required'));
       notify('error', err.message);
       if (quote) refreshQuote(); // the failure may be "quote is locked" or "quote was deleted"
     } finally {
@@ -295,6 +292,10 @@ export function CartProvider({ children }) {
       remove: (lineId) => dispatch({ type: 'remove', lineId }),
       clear: () => dispatch({ type: 'clear' }),
       startNewQuote: () => dispatch({ type: 'detachQuote' }),
+      // load one of the customer's quotes into the cart: mode 'edit' keeps it linked, 'revise' prepares a new quote
+      loadQuote: (cartQuote, mode) =>
+        dispatch(mode === 'edit' ? { type: 'loadQuote', items: cartQuote.items, quote: cartQuote.quote } : { type: 'loadRevision', items: cartQuote.items, reviseFrom: cartQuote.quote.id }),
+      reviseFrom: state.reviseFrom,
       refreshPrices: (products) => dispatch({ type: 'refreshPrices', products }),
       saveQuote,
     };

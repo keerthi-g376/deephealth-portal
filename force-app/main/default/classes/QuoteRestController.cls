@@ -92,6 +92,13 @@ global with sharing class QuoteRestController {
     // items can no longer be replaced through PATCH.
     private static final Set<String> EDITABLE_STATUSES = new Set<String>{ 'Draft', 'Pending' };
 
+    // Portal customers (requests carrying a contactId) may only change a quote's lines while it is Draft.
+    // Any later status is changed by creating a revision (a new quote on the same Opportunity).
+    private static final Set<String> CUSTOMER_EDITABLE_STATUSES = new Set<String>{ 'Draft' };
+
+    // An open web Opportunity is reused for the same customer only if it was touched within this many days.
+    private static final Integer OPPORTUNITY_REUSE_DAYS = 90;
+
     // ============================= GET =====================================
     // /api/quotes/            -> list
     // /api/quotes/{quoteId}   -> single quote detail
@@ -100,12 +107,16 @@ global with sharing class QuoteRestController {
         RestResponse res = RestContext.response;
         res.addHeader('Content-Type', 'application/json');
         String quoteId = getIdFromUri(RestContext.request.requestURI);
+        String contactId = RestContext.request.params.get('contactId');
 
         try {
             if (String.isNotBlank(quoteId)) {
+                assertOwnedBy(quoteId, contactId);
                 res.responseBody = Blob.valueOf(JSON.serialize(getQuoteDetail(quoteId)));
             } else {
-                res.responseBody = Blob.valueOf(JSON.serialize(getQuoteList()));
+                // never list every quote: the list is always scoped to one customer contact
+                if (String.isBlank(contactId)) throw new QuoteApiException('contactId is required to list quotes');
+                res.responseBody = Blob.valueOf(JSON.serialize(getQuoteList(contactId)));
             }
         } catch (Exception ex) {
             writeError(res, 400, ex.getMessage());
@@ -118,6 +129,7 @@ global with sharing class QuoteRestController {
     global static void handlePost() {
         RestResponse res = RestContext.response;
         res.addHeader('Content-Type', 'application/json');
+        Savepoint sp = Database.setSavepoint(); // a failed create leaves nothing behind
 
         try {
             String rawBody = RestContext.request.requestBody.toString();
@@ -127,12 +139,18 @@ global with sharing class QuoteRestController {
             // and make sure it has the Standard Price Book assigned. A Quote's
             // line items can only use PricebookEntries from the same Pricebook2
             // as the Opportunity/Quote, so this has to happen before insert.
-            Id oppId = String.isNotBlank(body.opportunityId) ? body.opportunityId : resolveOrCreateDefaultOpportunity();
+            Id oppId;
+            if (String.isNotBlank(body.contactId)) {
+                oppId = resolveOpportunityForContact(body.contactId, body.opportunityId, body.currencyCode);
+            } else {
+                oppId = String.isNotBlank(body.opportunityId) ? body.opportunityId : resolveOrCreateDefaultOpportunity();
+            }
             ensureOpportunityHasPricebook(oppId); // covers caller-supplied opportunityId too
 
             Quote q = new Quote();
             q.Name             = String.isNotBlank(body.name) ? body.name : 'Web Quote ' + DateTime.now().format('yyyy-MM-dd HH:mm');
             q.OpportunityId     = oppId;
+            if (String.isNotBlank(body.contactId)) q.ContactId = body.contactId;
             q.Pricebook2Id      = getStandardPricebookId(); // set directly - don't rely on Opportunity->Quote sync via API
             q.Status            = String.isNotBlank(body.status) ? body.status : 'Draft';
             q.Description        = body.notes;
@@ -155,6 +173,11 @@ global with sharing class QuoteRestController {
             // PricebookEntry in the SAME currency - guessing/assuming here
             // is exactly what causes FIELD_INTEGRITY_EXCEPTION on insert.
             Quote insertedQuote = [SELECT Id, CurrencyIsoCode FROM Quote WHERE Id = :q.Id LIMIT 1];
+            if (String.isNotBlank(body.currencyCode) && insertedQuote.CurrencyIsoCode != body.currencyCode) {
+                throw new QuoteApiException(
+                    'The quote currency (' + insertedQuote.CurrencyIsoCode + ') does not match the requested currency (' + body.currencyCode + ').'
+                );
+            }
 
             if (body.lineItems != null && !body.lineItems.isEmpty()) {
                 insertLineItems(q.Id, body.lineItems, insertedQuote.CurrencyIsoCode);
@@ -163,6 +186,7 @@ global with sharing class QuoteRestController {
             res.statusCode = 201;
             res.responseBody = Blob.valueOf(JSON.serialize(getQuoteDetail(q.Id)));
         } catch (Exception ex) {
+            Database.rollback(sp);
             writeError(res, 400, ex.getMessage());
         }
     }
@@ -177,11 +201,14 @@ global with sharing class QuoteRestController {
         RestResponse res = RestContext.response;
         res.addHeader('Content-Type', 'application/json');
         String quoteId = getIdFromUri(RestContext.request.requestURI);
+        String contactId = RestContext.request.params.get('contactId');
+        Savepoint sp = Database.setSavepoint(); // delete-and-reinsert of lines is all or nothing
 
         try {
             if (String.isBlank(quoteId)) {
                 throw new QuoteApiException('Quote Id is required in the URL, e.g. /api/quotes/{id}');
             }
+            assertOwnedBy(quoteId, contactId);
             String rawBody = RestContext.request.requestBody.toString();
             QuoteUpdateWrapper body = (QuoteUpdateWrapper) JSON.deserialize(rawBody, QuoteUpdateWrapper.class);
 
@@ -194,10 +221,11 @@ global with sharing class QuoteRestController {
             // but is enforced here too so the rule holds even if called directly.
             if (replacingLineItems) {
                 Quote existing = [SELECT Id, Status FROM Quote WHERE Id = :quoteId LIMIT 1];
-                if (!EDITABLE_STATUSES.contains(existing.Status)) {
+                Set<String> editable = String.isNotBlank(contactId) ? CUSTOMER_EDITABLE_STATUSES : EDITABLE_STATUSES;
+                if (!editable.contains(existing.Status)) {
                     throw new QuoteApiException(
                         'Line items can no longer be changed once a quote is "' + existing.Status +
-                        '". Only Draft or Pending quotes can have their products/quantities updated.'
+                        '". Only ' + String.join(new List<String>(editable), ' or ') + ' quotes can have their products/quantities updated.'
                     );
                 }
             }
@@ -231,6 +259,7 @@ global with sharing class QuoteRestController {
             res.statusCode = 200;
             res.responseBody = Blob.valueOf(JSON.serialize(getQuoteDetail(quoteId)));
         } catch (Exception ex) {
+            Database.rollback(sp);
             writeError(res, 400, ex.getMessage());
         }
     }
@@ -247,6 +276,7 @@ global with sharing class QuoteRestController {
             if (String.isBlank(quoteId)) {
                 throw new QuoteApiException('Quote Id is required in the URL, e.g. /api/quotes/{id}');
             }
+            assertOwnedBy(quoteId, RestContext.request.params.get('contactId'));
             delete new Quote(Id = quoteId);
             res.statusCode = 200;
             res.responseBody = Blob.valueOf(JSON.serialize(new Map<String, Object>{ 'success' => true, 'id' => quoteId }));
@@ -291,7 +321,9 @@ global with sharing class QuoteRestController {
     private static Id cachedStandardPricebookId;
     private static Id getStandardPricebookId() {
         if (cachedStandardPricebookId == null) {
-            cachedStandardPricebookId = [SELECT Id FROM Pricebook2 WHERE IsStandard = true LIMIT 1].Id;
+            cachedStandardPricebookId = Test.isRunningTest()
+                ? Test.getStandardPricebookId()
+                : [SELECT Id FROM Pricebook2 WHERE IsStandard = true LIMIT 1].Id;
         }
         return cachedStandardPricebookId;
     }
@@ -307,6 +339,64 @@ global with sharing class QuoteRestController {
             opp.Pricebook2Id = getStandardPricebookId();
             update opp;
         }
+    }
+
+    // A quote may only be touched by the customer contact it belongs to. When no contactId is supplied the
+    // call is an internal one (the old behaviour). A mismatch looks exactly like a missing quote.
+    private static void assertOwnedBy(Id quoteId, String contactId) {
+        if (String.isBlank(contactId)) return;
+        Integer n = [SELECT COUNT() FROM Quote WHERE Id = :quoteId AND ContactId = :contactId];
+        if (n == 0) throw new QuoteApiException('Quote not found: ' + quoteId);
+    }
+
+    // Opportunity rules for a signed-in customer:
+    //  - a given opportunityId (a revision) is used only if it belongs to the customer's Account;
+    //  - otherwise REUSE the customer's most recent OPEN, web-sourced Opportunity in the same currency that has
+    //    this contact on it and was touched in the last OPPORTUNITY_REUSE_DAYS days;
+    //  - otherwise CREATE a new one (with this contact as its contact role).
+    @TestVisible
+    private static Id resolveOpportunityForContact(Id contactId, String requestedOppId, String currencyCode) {
+        Contact c = [SELECT Id, AccountId, Account.Name FROM Contact WHERE Id = :contactId LIMIT 1];
+        if (c.AccountId == null) throw new QuoteApiException('The customer contact has no account.');
+
+        if (String.isNotBlank(requestedOppId)) {
+            Integer own = [SELECT COUNT() FROM Opportunity WHERE Id = :requestedOppId AND AccountId = :c.AccountId];
+            if (own == 0) throw new QuoteApiException('Opportunity not found: ' + requestedOppId);
+            ensureOpportunityHasPricebook(requestedOppId);
+            return requestedOppId;
+        }
+
+        String cur = String.isNotBlank(currencyCode) ? currencyCode : UserInfo.getDefaultCurrency();
+        Datetime cutoff = Datetime.now().addDays(-OPPORTUNITY_REUSE_DAYS);
+        List<Opportunity> reusable = [
+            SELECT Id
+            FROM Opportunity
+            WHERE AccountId = :c.AccountId
+              AND IsClosed = false
+              AND LeadSource = 'Web'
+              AND CurrencyIsoCode = :cur
+              AND LastModifiedDate >= :cutoff
+              AND Id IN (SELECT OpportunityId FROM OpportunityContactRole WHERE ContactId = :c.Id)
+            ORDER BY LastModifiedDate DESC
+            LIMIT 1
+        ];
+        if (!reusable.isEmpty()) {
+            ensureOpportunityHasPricebook(reusable[0].Id);
+            return reusable[0].Id;
+        }
+
+        Opportunity opp = new Opportunity(
+            Name         = ('Web enquiry - ' + c.Account.Name + ' - ' + Date.today().format()).left(120),
+            AccountId    = c.AccountId,
+            StageName    = 'Proposal/Price Quote',
+            CloseDate    = Date.today().addDays(30),
+            LeadSource   = 'Web',
+            Pricebook2Id = getStandardPricebookId(),
+            CurrencyIsoCode = cur
+        );
+        insert opp;
+        insert new OpportunityContactRole(OpportunityId = opp.Id, ContactId = c.Id, IsPrimary = true);
+        return opp.Id;
     }
 
     // Replaces the full set of QuoteLineItems on a quote: delete everything
@@ -448,13 +538,15 @@ global with sharing class QuoteRestController {
         return opp.Id;
     }
 
-    private static List<QuoteSummaryDTO> getQuoteList() {
+    private static List<QuoteSummaryDTO> getQuoteList(Id contactId) {
         List<QuoteSummaryDTO> out = new List<QuoteSummaryDTO>();
         for (Quote q : [
             SELECT Id, QuoteNumber, Name, Status, Quote_Source__c, GrandTotal, Subtotal, Tax,
-                   ShippingHandling, TotalPrice, CreatedDate, LineItemCount
+                   ShippingHandling, TotalPrice, CreatedDate, LineItemCount, CurrencyIsoCode
             FROM Quote
+            WHERE ContactId = :contactId
             ORDER BY CreatedDate DESC
+            LIMIT 200
         ]) {
             out.add(new QuoteSummaryDTO(q));
         }
@@ -465,7 +557,7 @@ global with sharing class QuoteRestController {
         List<Quote> quotes = [
             SELECT Id, QuoteNumber, Name, Status, Quote_Source__c, Description, GrandTotal, Subtotal,
                    Tax, ShippingHandling, TotalPrice, TotalPriceWithTax, Discount,
-                   CreatedDate, ExpirationDate, OpportunityId
+                   CreatedDate, ExpirationDate, OpportunityId, CurrencyIsoCode
             FROM Quote
             WHERE Id = :quoteId
             LIMIT 1
@@ -485,6 +577,8 @@ global with sharing class QuoteRestController {
 
     global class QuoteRequestWrapper {
         global String opportunityId;
+        global String contactId;    // signed-in portal customer: the quote belongs to this contact
+        global String currencyCode; // currency the customer is buying in (must match the Opportunity/Quote)
         global String name;
         global String status;
         global String notes;
@@ -535,8 +629,10 @@ global with sharing class QuoteRestController {
         global Decimal shippingHandling;
         global Integer itemCount;
         global String createdDate;
+        global String currencyCode;
 
         global QuoteSummaryDTO(Quote q) {
+            this.currencyCode      = q.CurrencyIsoCode;
             this.id               = q.Id;
             this.quoteNumber      = q.QuoteNumber;
             this.name             = q.Name;
@@ -567,9 +663,11 @@ global with sharing class QuoteRestController {
         global String createdDate;
         global String expirationDate;
         global String opportunityId;
+        global String currencyCode;
         global List<QuoteLineDTO> products;
 
         global QuoteDetailDTO(Quote q, List<QuoteLineItem> lines) {
+            this.currencyCode      = q.CurrencyIsoCode;
             this.id                = q.Id;
             this.quoteNumber       = q.QuoteNumber;
             this.name              = q.Name;

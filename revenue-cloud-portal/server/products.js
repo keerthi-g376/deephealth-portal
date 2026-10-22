@@ -267,9 +267,8 @@ function normalize(p, picklists, currency, components, rulesByBundle, classifica
   };
 }
 
-async function loadCatalog() {
+async function loadCatalog(currency) {
   const catalog = process.env.SF_CATALOG_NAME || 'CareSphere Health Product Catalog';
-  const currency = process.env.SF_CURRENCY || 'USD';
 
   const catalogRows = await soql(
     productQuery(
@@ -349,17 +348,21 @@ async function loadCatalog() {
   };
 }
 
-// The catalog changes rarely; a short cache keeps the storefront snappy and lets the
+// The catalog changes rarely; a short cache (one entry per currency) keeps the storefront snappy and lets the
 // quote endpoints re-price cart lines from Salesforce instead of trusting the browser.
 const TTL_MS = 60_000;
-let cache = { at: 0, data: null, pending: null };
+const caches = new Map(); // currency -> { at, data, pending }
 
-export async function getProducts({ fresh = false } = {}) {
+export const defaultCurrency = () => process.env.SF_CURRENCY || 'USD';
+
+export async function getProducts({ fresh = false, currency = defaultCurrency() } = {}) {
+  let cache = caches.get(currency);
+  if (!cache) caches.set(currency, (cache = { at: 0, data: null, pending: null }));
   if (!fresh && cache.data && Date.now() - cache.at < TTL_MS) return cache.data;
   if (!cache.pending) {
-    cache.pending = loadCatalog()
+    cache.pending = loadCatalog(currency)
       .then((data) => {
-        cache = { at: Date.now(), data, pending: null };
+        Object.assign(cache, { at: Date.now(), data, pending: null });
         return data;
       })
       .catch((err) => {

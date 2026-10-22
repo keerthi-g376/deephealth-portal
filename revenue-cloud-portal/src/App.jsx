@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from './api.js';
 import { isConfigurable } from './attributes.js';
+import { AuthProvider, useAuth } from './auth.jsx';
 import { CartProvider, useCart } from './cart.jsx';
 import BundlePage from './components/BundlePage.jsx';
 import Cart, { CartPage } from './components/Cart.jsx';
@@ -8,11 +9,14 @@ import ChatWidget from './components/ChatWidget.jsx';
 import ConfigurePage from './components/ConfigurePage.jsx';
 import ProductCard from './components/ProductCard.jsx';
 import QuotePage from './components/QuotePage.jsx';
+import LeadForm from './components/LeadForm.jsx';
+import MyQuotes from './components/MyQuotes.jsx';
+import SignInModal from './components/SignInModal.jsx';
 import Toasts from './components/Toasts.jsx';
+import { setDisplayCurrency } from './format.js';
 import { ArrowRightIcon, BellIcon, CartIcon, ChevronDownIcon, FilterIcon, SearchIcon } from './components/icons.jsx';
 
-// Shown in the header's account chip. Static for now - there is no user login in the portal.
-const ACCOUNT = { initials: 'SP', name: 'Sri Padma' };
+const initialsOf = (name) => name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join('');
 
 const PRICE_RANGES = [
   { id: 'any', label: 'Price Range', test: () => true },
@@ -40,15 +44,42 @@ function Chip({ value, onChange, children, solid = false, label }) {
   );
 }
 
-function useCatalog() {
+function useCountry() {
+  const [countries, setCountries] = useState([]);
+  const [code, setCode] = useState(() => {
+    try {
+      return localStorage.getItem('dh-country') || '';
+    } catch {
+      return '';
+    }
+  });
+  useEffect(() => {
+    api.getCountries().then(setCountries).catch(() => {});
+  }, []);
+  const country = countries.find((c) => c.code === code) ?? null;
+  const choose = (c) => {
+    setCode(c);
+    try {
+      localStorage.setItem('dh-country', c);
+    } catch {
+      /* storage unavailable: the choice just won't persist */
+    }
+  };
+  return { countries, country, choose };
+}
+
+function useCatalog(countryCode) {
   const [state, setState] = useState({ status: 'loading', products: [], componentProducts: [], error: '' });
   const load = useCallback(() => {
     setState((s) => ({ ...s, status: 'loading', error: '' }));
     api
-      .getProducts()
-      .then((d) => setState({ status: 'ready', products: d.products, componentProducts: d.componentProducts ?? [], error: '' }))
+      .getProducts(countryCode)
+      .then((d) => {
+        setDisplayCurrency(d.country?.currency);
+        setState({ status: 'ready', products: d.products, componentProducts: d.componentProducts ?? [], error: '' });
+      })
       .catch((e) => setState((s) => ({ ...s, status: 'error', error: e.message })));
-  }, []);
+  }, [countryCode]);
   useEffect(load, [load]);
   return { ...state, reload: load };
 }
@@ -79,8 +110,10 @@ function useRoute() {
   return { route, back };
 }
 
-function Storefront({ catalog }) {
+function Storefront({ catalog, geo }) {
   const cart = useCart();
+  const [leadOpen, setLeadOpen] = useState(false);
+  const auth = useAuth();
   const { route, back } = useRoute();
   const [query, setQuery] = useState('');
   const [family, setFamily] = useState('All');
@@ -145,11 +178,13 @@ function Storefront({ catalog }) {
   const isConfigureRoute = route.name === 'configure';
   const isQuoteRoute = route.name === 'quote';
   const isCartRoute = route.name === 'cart';
-  const onDetail = isBundleRoute || isConfigureRoute || isQuoteRoute || isCartRoute;
+  const isQuotesRoute = route.name === 'quotes';
+  const onDetail = isBundleRoute || isConfigureRoute || isQuoteRoute || isCartRoute || isQuotesRoute;
 
   let detail = null;
   if (onDetail) {
-    if (isQuoteRoute) detail = <QuotePage onBack={back} />;
+    if (isQuotesRoute) detail = <MyQuotes onLoaded={geo.syncCurrency} />;
+    else if (isQuoteRoute) detail = <QuotePage onBack={back} />;
     else if (isCartRoute) detail = <CartPage byId={byId} />;
     else if (catalog.status === 'loading') detail = <p className="state">Loading from Salesforce…</p>;
     else if (catalog.status === 'error') detail = <p className="state error">{catalog.error}</p>;
@@ -186,6 +221,19 @@ function Storefront({ catalog }) {
               Quote #{cart.quote.quoteNumber} · {cart.quote.status}
             </a>
           )}
+          <Chip value={geo.country?.code ?? ''} onChange={geo.choose} label="Country">
+            <option value="" disabled={!!geo.country}>
+              Select country
+            </option>
+            {geo.countries.map((c) => (
+              <option key={c.code} value={c.code} disabled={(cart.count > 0 || !!cart.quote) && c.code !== geo.country?.code}>
+                {c.name} ({c.currency})
+              </option>
+            ))}
+          </Chip>
+          <button className="cart-pill" onClick={() => setLeadOpen(true)}>
+            I'm interested
+          </button>
           <button className="cart-pill" onClick={() => setCartOpen(true)}>
             <CartIcon width={16} height={16} />
             Cart
@@ -194,13 +242,20 @@ function Storefront({ catalog }) {
           <button className="bell" aria-label="Notifications">
             <BellIcon width={18} height={18} />
           </button>
-          <div className="account" title="Signed-in account">
-            <span className="avatar">{ACCOUNT.initials}</span>
-            <span className="account-text">
-              <small>MY ACCOUNT</small>
-              <strong>{ACCOUNT.name}</strong>
-            </span>
-          </div>
+          {auth.user ? (
+            <>
+              <a className="view-all" href="#/quotes">My Quotations</a>
+              <button className="account" title="Sign out" onClick={auth.signOut}>
+                <span className="avatar">{initialsOf(auth.user.name)}</span>
+                <span className="account-text">
+                  <small>SIGN OUT</small>
+                  <strong>{auth.user.name}</strong>
+                </span>
+              </button>
+            </>
+          ) : (
+            <button className="cart-pill" onClick={auth.openSignIn}>Sign in</button>
+          )}
         </div>
       </header>
 
@@ -320,16 +375,26 @@ function Storefront({ catalog }) {
 
       <Cart open={cartOpen} onClose={closeCart} byId={byId} />
       {catalog.status === 'ready' && <ChatWidget products={products} byId={byId} />}
+      {leadOpen && <LeadForm countries={geo.countries} country={geo.country} products={products} onClose={() => setLeadOpen(false)} />}
+      <SignInModal countryCode={geo.country?.code ?? ''} />
       <Toasts />
     </>
   );
 }
 
 export default function App() {
-  const catalog = useCatalog();
+  const geo = useCountry();
+  // a loaded quotation is priced in its own currency: switch the storefront to a country that uses it
+  geo.syncCurrency = (currency) => {
+    const match = geo.countries.find((c) => c.currency === currency);
+    if (match && match.currency !== geo.country?.currency) geo.choose(match.code);
+  };
+  const catalog = useCatalog(geo.country?.code ?? '');
   return (
-    <CartProvider>
-      <Storefront catalog={catalog} />
-    </CartProvider>
+    <AuthProvider>
+      <CartProvider>
+        <Storefront catalog={catalog} geo={geo} />
+      </CartProvider>
+    </AuthProvider>
   );
 }

@@ -21,11 +21,20 @@ async function request(path, options = {}) {
 }
 
 export const api = {
-  getProducts: () => request('/api/products'),
+  getProducts: (country) => request(`/api/products${country ? `?country=${encodeURIComponent(country)}` : ''}`),
+  getCountries: () => request('/api/countries'),
+  createLead: (lead) => request('/api/leads', { method: 'POST', body: JSON.stringify(lead) }),
   health: () => request('/api/health'),
   chat: (messages, cart) => request('/api/chat', { method: 'POST', body: JSON.stringify({ messages, cart }) }),
   getQuote: (id) => request(`/api/quotes/${id}`),
-  createQuote: (lineItems) => request('/api/quotes', { method: 'POST', body: JSON.stringify({ lineItems }) }),
+  createQuote: (lineItems, { currency, reviseFrom } = {}) =>
+    request('/api/quotes', { method: 'POST', body: JSON.stringify({ lineItems, currency, reviseFrom }) }),
+  myQuotes: () => request('/api/my/quotes'),
+  quoteAsCart: (id) => request(`/api/quotes/${id}/cart`),
+  me: () => request('/api/auth/me'),
+  requestCode: (email) => request('/api/auth/request', { method: 'POST', body: JSON.stringify({ email }) }),
+  verifyCode: (details) => request('/api/auth/verify', { method: 'POST', body: JSON.stringify(details) }),
+  logout: () => request('/api/auth/logout', { method: 'POST' }),
   updateQuote: (id, lineItems) =>
     request(`/api/quotes/${id}`, { method: 'PATCH', body: JSON.stringify({ lineItems }) }),
 };

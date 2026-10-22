@@ -40,3 +40,11 @@ export const attributeKey = (attributes = []) =>
     .map((a) => `${a.name}=${a.value}`)
     .sort()
     .join(';');
+
+// A cart line is a product plus its attribute choices. A product added without any configuration keeps the plain
+// product id as its line id. A component added under a bundle is a different line from the same product on its own.
+export const lineIdOf = (productId, attributes, parentLineId = null) => {
+  const key = attributeKey(attributes);
+  const own = key ? `${productId}|${key}` : productId;
+  return parentLineId ? `${parentLineId}>${own}` : own;
+};

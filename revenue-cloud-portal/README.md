@@ -23,6 +23,16 @@ npm run build && npm start      # http://localhost:8787   (production mode)
 With no `SF_CLIENT_ID` / `SF_CLIENT_SECRET` in `.env` the server uses your logged-in Salesforce CLI session
 (`SF_CLI_ORG`). The CLI makes the calls itself; the access token is never read. **Local development only.**
 
+## Customers, countries and My Quotations
+
+- **Country**: the header selector maps a country to a currency (`server/countries.js`, override with `COUNTRIES_JSON`); the catalog is read from the Standard Price Book entries in that currency. Each currency needs active entries in Salesforce.
+- **Lead**: "I'm interested" posts to `POST /api/leads` -> Apex `PortalLeadService` (one open Lead per email, duplicate rules bypassed so an enquiry is never lost).
+- **Sign-in**: an emailed 6-digit code (stateless HMAC, 10-20 min, rate limited) proves the email. That is when the Lead is converted (`PortalCustomerService`: existing Contact is reused, otherwise the Lead converts to Account + Contact, no Opportunity). A signed HttpOnly session cookie carries the Contact id.
+- **Quotes** belong to the Contact (`Quote.ContactId`). Every quote call passes `contactId`; Apex returns "not found" for anything that is not theirs, and listing is always scoped to a contact.
+- **Opportunity**: reused when it is open, web-sourced, same Account + currency, has this Contact on it and was touched in the last 90 days (`OPPORTUNITY_REUSE_DAYS`); otherwise a new one is created. A revision always goes on the original Opportunity.
+- **Editing**: a Draft is edited in place; any later status is viewed or **Revised** (lines copied into a new Draft quote on the same Opportunity). Create and line replacement are atomic (savepoint + rollback).
+- Run-as user: assign the `Portal_Integration` permission set. Local development without email delivery prints the sign-in code in the server log.
+
 ## How quote create/update works
 
 | Cart state | Button | Call |
@@ -87,8 +97,7 @@ QuoteLineItem; **create** on `QuoteLineRelationship` and `QuoteLineItemAttribute
 ### Public mode (automatic when `SF_CLIENT_ID`/`SF_CLIENT_SECRET` are set, or `PUBLIC_MODE=true`)
 
 There is no user login, so anyone with the link can browse and build quotes. To protect the org:
-- a visitor can only open/update quotes **created in their own browser** (ids kept in a signed, HttpOnly, Secure cookie;
-  forged or foreign quote ids get `403`);
+- quotes can only be opened or changed by the signed-in customer who owns them;
 - at most 10 quote creations per hour and 120 API calls per minute per client address (`429` beyond that);
 - the product catalog is served from a 60-second cache instead of querying Salesforce on every visit.
 

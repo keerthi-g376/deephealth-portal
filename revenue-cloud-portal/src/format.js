@@ -1,6 +1,13 @@
 const currencyFormatters = new Map();
 
-export function money(amount, currency = 'USD') {
+// Currency used when a caller does not pass one: set from the country the visitor chose.
+let displayCurrency = 'USD';
+export const getDisplayCurrency = () => displayCurrency;
+export const setDisplayCurrency = (c) => {
+  displayCurrency = c || 'USD';
+};
+
+export function money(amount, currency = displayCurrency) {
   if (!currencyFormatters.has(currency)) {
     currencyFormatters.set(currency, new Intl.NumberFormat('en-US', { style: 'currency', currency }));
   }
