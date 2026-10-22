@@ -226,7 +226,7 @@ function Storefront({ catalog, geo }) {
               Select country
             </option>
             {geo.countries.map((c) => (
-              <option key={c.code} value={c.code} disabled={(cart.count > 0 || !!cart.quote) && c.code !== geo.country?.code}>
+              <option key={c.code} value={c.code} disabled={!!cart.quote && c.currency !== geo.country?.currency}>
                 {c.name} ({c.currency})
               </option>
             ))}
