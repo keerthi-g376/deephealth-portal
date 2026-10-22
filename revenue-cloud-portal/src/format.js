@@ -16,3 +16,7 @@ export function money(amount, currency = displayCurrency) {
 
 // "Term Based - Yearly" style label for a selling model option.
 export const sellingModelLabel = (m) => m.name || m.type || 'Selling model';
+
+// Whole-unit amount (no decimals) in a currency, e.g. for filter labels.
+export const moneyWhole = (amount, currency = displayCurrency) =>
+  new Intl.NumberFormat('en-US', { style: 'currency', currency, maximumFractionDigits: 0 }).format(amount);

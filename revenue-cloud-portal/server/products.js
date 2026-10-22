@@ -379,6 +379,7 @@ export async function getProducts({ fresh = false, currency = defaultCurrency() 
 // Currencies in which the catalog has at least one active Standard Price Book price (cached a few minutes).
 let currencyCache = { at: 0, list: null };
 export async function pricedCurrencies() {
+  // { USD: 1, EUR: 1.1, ... } - currencies with priced catalog products and their rate to the corporate currency
   if (currencyCache.list && Date.now() - currencyCache.at < 300_000) return currencyCache.list;
   const catalog = process.env.SF_CATALOG_NAME || "CareSphere Health Product Catalog";
   const rows = await soql(
@@ -387,6 +388,7 @@ export async function pricedCurrencies() {
         AND Product2Id IN (SELECT ProductId FROM ProductCategoryProduct WHERE ProductCategory.Catalog.Name = '${escapeSoql(catalog)}')
       GROUP BY CurrencyIsoCode`,
   );
-  currencyCache = { at: Date.now(), list: rows.map((r) => r.CurrencyIsoCode) };
+  const rates = new Map((await soql('SELECT IsoCode, ConversionRate FROM CurrencyType WHERE IsActive = true')).map((r) => [r.IsoCode, r.ConversionRate]));
+  currencyCache = { at: Date.now(), list: Object.fromEntries(rows.map((r) => [r.CurrencyIsoCode, rates.get(r.CurrencyIsoCode) ?? 1])) };
   return currencyCache.list;
 }

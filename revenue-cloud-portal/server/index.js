@@ -225,7 +225,7 @@ app.get(
   '/api/countries',
   wrap(async (_req, res) => {
     const priced = await pricedCurrencies();
-    res.json(countries.filter((c) => priced.includes(c.currency)));
+    res.json(countries.filter((c) => c.currency in priced).map((c) => ({ ...c, rate: priced[c.currency] })));
   }),
 );
 

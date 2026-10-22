@@ -13,17 +13,27 @@ import LeadForm from './components/LeadForm.jsx';
 import MyQuotes from './components/MyQuotes.jsx';
 import SignInModal from './components/SignInModal.jsx';
 import Toasts from './components/Toasts.jsx';
-import { setDisplayCurrency } from './format.js';
+import { moneyWhole, setDisplayCurrency } from './format.js';
 import { ArrowRightIcon, BellIcon, CartIcon, ChevronDownIcon, FilterIcon, SearchIcon } from './components/icons.jsx';
 
 const initialsOf = (name) => name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join('');
 
-const PRICE_RANGES = [
-  { id: 'any', label: 'Price Range', test: () => true },
-  { id: 'lt1k', label: 'Under $1,000', test: (p) => p < 1000 },
-  { id: '1k-10k', label: '$1,000 – $10,000', test: (p) => p >= 1000 && p <= 10000 },
-  { id: 'gt10k', label: 'Over $10,000', test: (p) => p > 10000 },
-];
+// Price-range filter: the thresholds are $1,000 and $10,000 converted to the selected currency (rounded).
+function priceRanges(rate = 1, currency) {
+  const nice = (usd) => {
+    const v = usd * rate;
+    const step = v >= 50_000 ? 10_000 : v >= 5_000 ? 1_000 : 100;
+    return Math.max(step, Math.round(v / step) * step);
+  };
+  const lo = nice(1000);
+  const hi = nice(10000);
+  return [
+    { id: 'any', label: 'Price Range', test: () => true },
+    { id: 'lt1k', label: `Under ${moneyWhole(lo, currency)}`, test: (p) => p < lo },
+    { id: '1k-10k', label: `${moneyWhole(lo, currency)} – ${moneyWhole(hi, currency)}`, test: (p) => p >= lo && p <= hi },
+    { id: 'gt10k', label: `Over ${moneyWhole(hi, currency)}`, test: (p) => p > hi },
+  ];
+}
 const SORTS = [
   { id: 'default', label: 'Sort by', cmp: null },
   { id: 'name', label: 'Name (A–Z)', cmp: (a, b) => a.name.localeCompare(b.name) },
@@ -124,6 +134,7 @@ function Storefront({ catalog, geo }) {
   const [cartOpen, setCartOpen] = useState(false);
   const closeCart = useCallback(() => setCartOpen(false), []);
   const { products, componentProducts } = catalog;
+  const PRICE_RANGES = useMemo(() => priceRanges(geo.country?.rate ?? 1, geo.country?.currency ?? 'USD'), [geo.country]);
 
   // Every product that can be shown or quoted: the catalog plus bundle children outside it.
   const allProducts = useMemo(() => [...products, ...componentProducts], [products, componentProducts]);
@@ -152,7 +163,7 @@ function Storefront({ catalog, geo }) {
     );
     const cmp = SORTS.find((x) => x.id === sort).cmp;
     return cmp ? [...list].sort(cmp) : list;
-  }, [products, query, family, priceRange, sort]);
+  }, [products, query, family, priceRange, sort, PRICE_RANGES]);
 
   const pages = Math.max(1, Math.ceil(visible.length / pageSize));
   const currentPage = Math.min(page, pages);
