@@ -340,7 +340,10 @@ async function loadCatalog(currency) {
   }
 
   return {
-    products: catalogRows.map((p) => normalize(p, picklists, currency, componentRows, rulesByBundle, classificationAttrs, pricingByProduct)),
+    // only products that have an active price in this currency are shown (and can be quoted)
+    products: catalogRows
+      .map((p) => normalize(p, picklists, currency, componentRows, rulesByBundle, classificationAttrs, pricingByProduct))
+      .filter((p) => p.unitPrice != null),
     // bundle children that are not listed in the catalog themselves
     componentProducts: extraRows.map((p) =>
       normalize(p, picklists, currency, componentRows, rulesByBundle, classificationAttrs, pricingByProduct),
@@ -371,4 +374,19 @@ export async function getProducts({ fresh = false, currency = defaultCurrency() 
       });
   }
   return cache.pending;
+}
+
+// Currencies in which the catalog has at least one active Standard Price Book price (cached a few minutes).
+let currencyCache = { at: 0, list: null };
+export async function pricedCurrencies() {
+  if (currencyCache.list && Date.now() - currencyCache.at < 300_000) return currencyCache.list;
+  const catalog = process.env.SF_CATALOG_NAME || "CareSphere Health Product Catalog";
+  const rows = await soql(
+    `SELECT CurrencyIsoCode FROM PricebookEntry
+      WHERE Pricebook2.IsStandard = true AND IsActive = true
+        AND Product2Id IN (SELECT ProductId FROM ProductCategoryProduct WHERE ProductCategory.Catalog.Name = '${escapeSoql(catalog)}')
+      GROUP BY CurrencyIsoCode`,
+  );
+  currencyCache = { at: Date.now(), list: rows.map((r) => r.CurrencyIsoCode) };
+  return currencyCache.list;
 }

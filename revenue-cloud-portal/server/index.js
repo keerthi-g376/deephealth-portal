@@ -3,7 +3,7 @@ import express from 'express';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { SfError, authMode, callCustomerApi, callLeadApi, callQuoteApi, insertRecords, soql } from './salesforce.js';
-import { defaultCurrency, getProducts } from './products.js';
+import { defaultCurrency, getProducts, pricedCurrencies } from './products.js';
 import { countries, countryByCode } from './countries.js';
 import crypto from 'node:crypto';
 import { codeIsValid, endSession, hitCounter, makeCode, rateLimit, readSession, startSession } from './guard.js';
@@ -220,7 +220,14 @@ app.get(
   }),
 );
 
-app.get('/api/countries', (_req, res) => res.json(countries));
+// only countries whose currency has priced catalog products are offered
+app.get(
+  '/api/countries',
+  wrap(async (_req, res) => {
+    const priced = await pricedCurrencies();
+    res.json(countries.filter((c) => priced.includes(c.currency)));
+  }),
+);
 
 // "I'm interested" -> a Lead in Salesforce (de-duplicated by email in Apex). Public form, so tightly rate limited.
 app.post(
