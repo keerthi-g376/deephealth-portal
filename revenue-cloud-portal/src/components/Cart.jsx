@@ -53,7 +53,7 @@ function LineAttribute({ attr, value, onChange }) {
 }
 
 // Everything inside the cart - used by both the pop-up (header Cart button) and the full "Your Cart" page.
-function CartContent({ byId }) {
+export function CartContent({ byId }) {
   const cart = useCart();
   const { user } = useAuth();
   const pending = !!user && user.access !== 'Active';

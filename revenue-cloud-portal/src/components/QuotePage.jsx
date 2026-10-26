@@ -3,6 +3,7 @@ import { api } from '../api.js';
 import { useCart } from '../cart.jsx';
 import { money } from '../format.js';
 import Breadcrumb from './Breadcrumb.jsx';
+import { CartContent } from './Cart.jsx';
 
 const day = (s) => {
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s ?? '');
@@ -11,8 +12,9 @@ const day = (s) => {
 
 // Quote details page: opened from the quote pill in the header. Everything shown is read from the
 // Salesforce quote itself (its fields and its saved line items), so it is exactly what Salesforce holds.
-export default function QuotePage({ id }) {
-  const { quote: linked, dirty } = useCart();
+export default function QuotePage({ id, byId, products: catalog = [] }) {
+  const { quote: linked, dirty, add } = useCart();
+  const [pick, setPick] = useState('');
   const quoteId = id || linked?.id;
   const quote = linked?.id === quoteId ? linked : quoteId ? { id: quoteId } : null; // the cart's own quote, or one opened from My Quotations
   const [state, setState] = useState({ status: 'loading', data: null, error: '' });
@@ -43,6 +45,17 @@ export default function QuotePage({ id }) {
   }
 
   const { data } = state;
+  const editing = !!data && data.status === 'Draft' && linked?.id === quoteId; // the linked Draft can be changed right here
+  const addable = catalog.filter((p) => p.unitPrice != null);
+  const addPick = () => {
+    const product = byId?.get(pick);
+    if (!product) return;
+    // bundles and configurable products are set up on their own page; plain products go straight into the quote
+    if (product.isBundle) window.location.hash = `#/bundle/${product.id}`;
+    else if (product.attributes.length) window.location.hash = `#/configure/${product.id}`;
+    else add(product);
+    setPick('');
+  };
   const products = data?.products ?? [];
   const facts = data
     ? [
@@ -66,7 +79,7 @@ export default function QuotePage({ id }) {
       </div>
       <p className="detail-sub">Quote details, addresses and products</p>
       {data && (data.status === 'Draft' && linked?.id === quoteId ? (
-        <p className="note">This quote is a draft. To change products or quantities, <a href="#/cart">open the cart</a> and click <strong>Update Quote</strong>.</p>
+        <p className="note">This quote is a draft. Add products below or change quantities, then click <strong>Update Quote</strong>. You can also do this from the cart.</p>
       ) : (
         <p className="note warn">This quote is {data.status} and can no longer be changed.</p>
       ))}
@@ -104,6 +117,28 @@ export default function QuotePage({ id }) {
             </dl>
           </div>
 
+          {editing && (
+            <div className="panel">
+              <h2>Add products</h2>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <select className="field" style={{ flex: '1 1 260px' }} value={pick} onChange={(e) => setPick(e.target.value)} aria-label="Product to add">
+                  <option value="">Choose a product…</option>
+                  {addable.map((p) => (
+                    <option key={p.id} value={p.id}>{p.name} - {money(p.unitPrice, p.currency)}</option>
+                  ))}
+                </select>
+                <button className="btn-coral" disabled={!pick} onClick={addPick}>Add</button>
+                <a className="btn-soft" href="#/" style={{ alignSelf: 'center' }}>Browse all products</a>
+              </div>
+            </div>
+          )}
+
+          {editing ? (
+            <div className="panel">
+              <h2>Products - change quantities, remove items, then click Update Quote</h2>
+              <CartContent byId={byId} />
+            </div>
+          ) : (
           <div className="panel">
             <h2>Products ({products.length})</h2>
             {products.length === 0 ? (
@@ -147,6 +182,7 @@ export default function QuotePage({ id }) {
               </div>
             </dl>
           </div>
+          )}
         </>
       )}
     </section>

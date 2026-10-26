@@ -199,7 +199,7 @@ function Storefront({ catalog, geo }) {
   if (onDetail) {
     if (isProfileRoute) detail = <MyProfile />;
     else if (isQuotesRoute) detail = <MyQuotes onLoaded={geo.syncCurrency} />;
-    else if (isQuoteRoute) detail = <QuotePage id={route.id} />;
+    else if (isQuoteRoute) detail = <QuotePage id={route.id} byId={byId} products={products} />;
     else if (isCartRoute) detail = <CartPage byId={byId} />;
     else if (catalog.status === 'loading') detail = <p className="state">Loading from Salesforce…</p>;
     else if (catalog.status === 'error') detail = <p className="state error">{catalog.error}</p>;
