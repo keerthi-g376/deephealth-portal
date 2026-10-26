@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useAuth } from '../auth.jsx';
 import { useCart } from '../cart.jsx';
 import { money } from '../format.js';
 import Breadcrumb from './Breadcrumb.jsx';
@@ -54,6 +55,8 @@ function LineAttribute({ attr, value, onChange }) {
 // Everything inside the cart - used by both the pop-up (header Cart button) and the full "Your Cart" page.
 function CartContent({ byId }) {
   const cart = useCart();
+  const { user } = useAuth();
+  const pending = !!user && user.access !== 'Active';
   const { items, quote, dirty, locked, saving } = cart;
   const [editing, setEditing] = useState(() => new Set()); // lines whose attributes are open for editing
   const toggleEditing = (lineId) =>
@@ -101,10 +104,11 @@ function CartContent({ byId }) {
 
   const isUpdate = !!quote && !locked;
   const label = saving ? (quote ? 'Updating…' : 'Creating…') : isUpdate ? 'Update Quote' : 'Create Quote';
-  const canSave = !saving && !locked && (quote ? dirty : items.length > 0);
+  const canSave = !saving && !locked && !pending && (quote ? dirty : items.length > 0);
 
   let hint = '';
-  if (locked) hint = `Quote ${quote.quoteNumber} is ${quote.status} and can no longer be changed.`;
+  if (pending) hint = 'Your access is waiting for approval from your account owner, so you cannot create quotes yet.';
+  else if (locked) hint = `Quote ${quote.quoteNumber} is ${quote.status} and can no longer be changed.`;
   else if (quote && !dirty) hint = 'Cart matches the Salesforce quote.';
   else if (quote) hint = 'You have changes that are not in Salesforce yet.';
 

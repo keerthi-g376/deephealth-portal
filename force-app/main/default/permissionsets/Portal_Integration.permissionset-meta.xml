@@ -13,6 +13,16 @@
         <enabled>true</enabled>
     </classAccesses>
     <description>Run-as user of the customer portal: lead capture, sign-in, contact-scoped quotes.</description>
+    <fieldPermissions>
+        <editable>true</editable>
+        <field>Contact.Portal_Access__c</field>
+        <readable>true</readable>
+    </fieldPermissions>
+    <fieldPermissions>
+        <editable>true</editable>
+        <field>Contact.Portal_Account_Admin__c</field>
+        <readable>true</readable>
+    </fieldPermissions>
     <hasActivationRequired>false</hasActivationRequired>
     <label>Portal Integration</label>
     <objectPermissions>

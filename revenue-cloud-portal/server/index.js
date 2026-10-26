@@ -266,6 +266,13 @@ const cleanEmail = (v) => {
   const email = String(v ?? '').trim().toLowerCase().slice(0, 254);
   return /^[^\s@]{1,64}@[^\s@]{1,255}\.[^\s@]{2,}$/.test(email) ? email : '';
 };
+const text = (v, max) => String(v ?? '').trim().slice(0, max);
+const cleanAddress = (a) =>
+  a && typeof a === 'object'
+    ? { street: text(a.street, 255), city: text(a.city, 80), state: text(a.state, 80), postalCode: text(a.postalCode, 20), country: text(a.country, 80) }
+    : null;
+// what the browser may know about the signed-in customer
+const publicUser = (c) => ({ contactId: c.contactId, name: c.name, email: c.email, access: c.access, isAdmin: !!c.isAdmin, accountName: c.accountName ?? '' });
 const signInLimit = publicMode
   ? rateLimit({ windowMs: 3_600_000, max: 30, message: 'Too many sign-in attempts from your network. Please try again later.' })
   : (_req, _res, next) => next();
@@ -298,25 +305,63 @@ app.post(
     if (!codeAttempts.allow(email)) throw new SfError('Too many wrong codes. Please wait a few minutes and try again.', 429);
     if (!codeIsValid(sessionSecret, email, String(b.code ?? '').trim())) throw new SfError('That code is not correct or has expired.', 400);
 
-    const text = (v, max) => String(v ?? '').trim().slice(0, max);
     const customer = await callCustomerApi('resolve', {
       email,
       firstName: text(b.firstName, 40),
       lastName: text(b.lastName, 80),
+      phone: text(b.phone, 40),
       company: text(b.company, 255),
+      individual: b.individual === true,
       country: countryByCode(b.country)?.name ?? '',
+      billing: cleanAddress(b.billing),
+      shipping: cleanAddress(b.shipping),
     });
-    if (customer.needsProfile) return res.json({ needsProfile: true });
-    const session = { contactId: customer.contactId, accountId: customer.accountId, name: customer.name || email, email };
-    startSession(req, res, sessionSecret, session);
-    res.json({ user: { name: session.name, email } });
+    if (customer.needsProfile) return res.json({ needsProfile: true, domainMatch: !!customer.domainMatch, accountName: customer.accountName ?? '' });
+    startSession(req, res, sessionSecret, { contactId: customer.contactId, accountId: customer.accountId, name: customer.name || email, email });
+    res.json({ user: publicUser(customer) });
   }),
 );
 
-app.get('/api/auth/me', (req, res) => {
-  const s = readSession(req, sessionSecret);
-  res.json({ user: s ? { name: s.name, email: s.email } : null });
-});
+app.get(
+  '/api/auth/me',
+  wrap(async (req, res) => {
+    const session = readSession(req, sessionSecret);
+    if (!session) return res.json({ user: null });
+    try {
+      res.json({ user: publicUser(await callCustomerApi('status', { contactId: session.contactId })) });
+    } catch {
+      endSession(res); // the contact no longer exists
+      res.json({ user: null });
+    }
+  }),
+);
+
+// My Profile: the customer's own details; an Account Admin also edits the Account's billing and shipping address.
+app.get(
+  '/api/profile',
+  requireCustomer,
+  wrap(async (req, res) => {
+    res.json(await callCustomerApi('profile', { contactId: req.customer.contactId }));
+  }),
+);
+app.put(
+  '/api/profile',
+  requireCustomer,
+  wrap(async (req, res) => {
+    const b = req.body ?? {};
+    if (!text(b.lastName, 80)) throw new SfError('Please enter your last name', 400);
+    res.json(
+      await callCustomerApi('saveProfile', {
+        contactId: req.customer.contactId,
+        firstName: text(b.firstName, 40),
+        lastName: text(b.lastName, 80),
+        phone: text(b.phone, 40),
+        billing: cleanAddress(b.billing),
+        shipping: cleanAddress(b.shipping),
+      }),
+    );
+  }),
+);
 
 app.post('/api/auth/logout', (_req, res) => {
   endSession(res);
@@ -335,7 +380,7 @@ app.get(
   '/api/my/quotes',
   requireCustomer,
   wrap(async (req, res) => {
-    res.json(await callQuoteApi('GET', '', null, own(req)));
+    res.json(await callQuoteApi('GET', '', null, own(req) + (req.query.scope === 'account' ? '&scope=account' : '')));
   }),
 );
 
@@ -359,7 +404,7 @@ app.post(
       ...body,
       contactId: req.customer.contactId,
       currencyCode: currency,
-      ...(revision ? { opportunityId: revision.opportunityId, notes: `Revision of quote #${revision.quoteNumber}` } : {}),
+      ...(revision ? { opportunityId: revision.opportunityId, supersedes: revision.id, notes: `Revision of quote #${revision.quoteNumber}` } : {}),
     });
     res.status(201).json({ ...quote, structureSync: await syncStructure(quote, lines) });
   }),
@@ -443,6 +488,28 @@ app.get(
       currency,
       items,
     });
+  }),
+);
+
+// Customer actions on a quote. Apex checks the owner and which status each action is allowed from:
+//   submit  Draft -> Needs Review (locks it for the pricing review)
+//   accept  Approved -> Accepted (the Opportunity becomes Closed Won)
+//   decline anything open -> Denied, with a reason (the Opportunity becomes Closed Lost)
+const ACTIONS = { submit: 'Needs Review', accept: 'Accepted', decline: 'Denied' };
+app.post(
+  '/api/quotes/:id/:action',
+  requireCustomer,
+  wrap(async (req, res) => {
+    const status = ACTIONS[req.params.action];
+    if (!status) throw new SfError('Unknown action', 404);
+    const id = quoteId(req);
+    const body = { status };
+    if (status === 'Denied') {
+      const existing = await callQuoteApi('GET', id, null, own(req));
+      const reason = text(req.body?.reason, 200) || 'no reason given';
+      body.notes = [existing.notes, `Customer not interested: ${reason}`].filter(Boolean).join('\n').slice(0, 2000);
+    }
+    res.json(await callQuoteApi('PATCH', id, body, own(req)));
   }),
 );
 

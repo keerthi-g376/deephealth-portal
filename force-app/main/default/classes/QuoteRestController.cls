@@ -96,6 +96,16 @@ global with sharing class QuoteRestController {
     // Any later status is changed by creating a revision (a new quote on the same Opportunity).
     private static final Set<String> CUSTOMER_EDITABLE_STATUSES = new Set<String>{ 'Draft' };
 
+    // What a signed-in customer may do to a quote, and from which statuses.
+    //   Needs Review = customer submitted it for pricing review; Accepted = customer accepted an approved quote;
+    //   Denied = customer is not interested. Superseded is set automatically when a revision replaces a quote.
+    private static final Map<String, Set<String>> CUSTOMER_TRANSITIONS = new Map<String, Set<String>>{
+        'Needs Review' => new Set<String>{ 'Draft' },
+        'Accepted' => new Set<String>{ 'Approved', 'Presented' },
+        'Denied' => new Set<String>{ 'Draft', 'Needs Review', 'In Review', 'Approved', 'Presented', 'Rejected' }
+    };
+    private static final Set<String> SUPERSEDABLE = new Set<String>{ 'Needs Review', 'In Review', 'Approved', 'Presented', 'Rejected' };
+
     // An open web Opportunity is reused for the same customer only if it was touched within this many days.
     private static final Integer OPPORTUNITY_REUSE_DAYS = 90;
 
@@ -111,12 +121,12 @@ global with sharing class QuoteRestController {
 
         try {
             if (String.isNotBlank(quoteId)) {
-                assertOwnedBy(quoteId, contactId);
+                assertOwnedBy(quoteId, contactId, true);
                 res.responseBody = Blob.valueOf(JSON.serialize(getQuoteDetail(quoteId)));
             } else {
-                // never list every quote: the list is always scoped to one customer contact
+                // never list every quote: the list is always scoped to one customer contact (or, for an Account Admin, their Account)
                 if (String.isBlank(contactId)) throw new QuoteApiException('contactId is required to list quotes');
-                res.responseBody = Blob.valueOf(JSON.serialize(getQuoteList(contactId)));
+                res.responseBody = Blob.valueOf(JSON.serialize(getQuoteList(contactId, RestContext.request.params.get('scope') == 'account')));
             }
         } catch (Exception ex) {
             writeError(res, 400, ex.getMessage());
@@ -139,6 +149,11 @@ global with sharing class QuoteRestController {
             // and make sure it has the Standard Price Book assigned. A Quote's
             // line items can only use PricebookEntries from the same Pricebook2
             // as the Opportunity/Quote, so this has to happen before insert.
+            Contact customer = null;
+            if (String.isNotBlank(body.contactId)) {
+                customer = portalContact(body.contactId);
+                assertActive(customer);
+            }
             Id oppId;
             if (String.isNotBlank(body.contactId)) {
                 oppId = resolveOpportunityForContact(body.contactId, body.opportunityId, body.currencyCode);
@@ -150,7 +165,10 @@ global with sharing class QuoteRestController {
             Quote q = new Quote();
             q.Name             = String.isNotBlank(body.name) ? body.name : 'Web Quote ' + DateTime.now().format('yyyy-MM-dd HH:mm');
             q.OpportunityId     = oppId;
-            if (String.isNotBlank(body.contactId)) q.ContactId = body.contactId;
+            if (String.isNotBlank(body.contactId)) {
+                q.ContactId = body.contactId;
+                copyAccountAddresses(q, customer);
+            }
             q.Pricebook2Id      = getStandardPricebookId(); // set directly - don't rely on Opportunity->Quote sync via API
             q.Status            = String.isNotBlank(body.status) ? body.status : 'Draft';
             q.Description        = body.notes;
@@ -183,6 +201,16 @@ global with sharing class QuoteRestController {
                 insertLineItems(q.Id, body.lineItems, insertedQuote.CurrencyIsoCode);
             }
 
+            // a revision replaces the quote it was made from
+            if (String.isNotBlank(body.contactId) && String.isNotBlank(body.supersedes)) {
+                assertOwnedBy(body.supersedes, body.contactId, true);
+                Quote old = [SELECT Id, Status FROM Quote WHERE Id = :body.supersedes LIMIT 1];
+                if (SUPERSEDABLE.contains(old.Status)) {
+                    old.Status = 'Superseded';
+                    update old;
+                }
+            }
+
             res.statusCode = 201;
             res.responseBody = Blob.valueOf(JSON.serialize(getQuoteDetail(q.Id)));
         } catch (Exception ex) {
@@ -208,9 +236,16 @@ global with sharing class QuoteRestController {
             if (String.isBlank(quoteId)) {
                 throw new QuoteApiException('Quote Id is required in the URL, e.g. /api/quotes/{id}');
             }
-            assertOwnedBy(quoteId, contactId);
+            assertOwnedBy(quoteId, contactId, false); // only the owner changes a quote (an Account Admin may view and revise)
             String rawBody = RestContext.request.requestBody.toString();
             QuoteUpdateWrapper body = (QuoteUpdateWrapper) JSON.deserialize(rawBody, QuoteUpdateWrapper.class);
+            if (String.isNotBlank(contactId)) {
+                // customers never set money fields or the quote source
+                body.tax = null;
+                body.shippingHandling = null;
+                body.quoteSource = null;
+                if (String.isNotBlank(body.status)) checkCustomerTransition(quoteId, body.status);
+            }
 
             Boolean replacingLineItems = body.lineItems != null;
 
@@ -251,6 +286,9 @@ global with sharing class QuoteRestController {
             if (hasChange) {
                 update q;
             }
+            if (hasChange && String.isNotBlank(contactId) && String.isNotBlank(body.status)) {
+                QuoteStageSync.apply(quoteId); // Opportunity follows the quote (not done in the Quote trigger: Salesforce forbids it)
+            }
 
             if (replacingLineItems) {
                 replaceLineItems(quoteId, body.lineItems);
@@ -276,7 +314,7 @@ global with sharing class QuoteRestController {
             if (String.isBlank(quoteId)) {
                 throw new QuoteApiException('Quote Id is required in the URL, e.g. /api/quotes/{id}');
             }
-            assertOwnedBy(quoteId, RestContext.request.params.get('contactId'));
+            assertOwnedBy(quoteId, RestContext.request.params.get('contactId'), false);
             delete new Quote(Id = quoteId);
             res.statusCode = 200;
             res.responseBody = Blob.valueOf(JSON.serialize(new Map<String, Object>{ 'success' => true, 'id' => quoteId }));
@@ -341,12 +379,66 @@ global with sharing class QuoteRestController {
         }
     }
 
-    // A quote may only be touched by the customer contact it belongs to. When no contactId is supplied the
-    // call is an internal one (the old behaviour). A mismatch looks exactly like a missing quote.
-    private static void assertOwnedBy(Id quoteId, String contactId) {
+    // The signed-in customer, with the Account addresses that are copied onto their quotes.
+    private static Contact portalContact(Id contactId) {
+        List<Contact> found = [
+            SELECT Id, AccountId, Portal_Access__c, Portal_Account_Admin__c, Account.Name,
+                   Account.BillingStreet, Account.BillingCity, Account.BillingState, Account.BillingPostalCode, Account.BillingCountry,
+                   Account.ShippingStreet, Account.ShippingCity, Account.ShippingState, Account.ShippingPostalCode, Account.ShippingCountry
+            FROM Contact
+            WHERE Id = :contactId
+            LIMIT 1
+        ];
+        if (found.isEmpty()) throw new QuoteApiException('Customer not found');
+        return found[0];
+    }
+
+    // A colleague waiting for the Account Owner's approval cannot use quotes. Empty Portal Access counts as Active.
+    private static void assertActive(Contact c) {
+        if (String.isNotBlank(c.Portal_Access__c) && c.Portal_Access__c != 'Active') {
+            throw new QuoteApiException('Your access is waiting for approval from your account owner.');
+        }
+    }
+
+    private static void copyAccountAddresses(Quote q, Contact c) {
+        q.BillingName = c.Account.Name;
+        q.BillingStreet = c.Account.BillingStreet;
+        q.BillingCity = c.Account.BillingCity;
+        q.BillingState = c.Account.BillingState;
+        q.BillingPostalCode = c.Account.BillingPostalCode;
+        q.BillingCountry = c.Account.BillingCountry;
+        q.ShippingName = c.Account.Name;
+        q.ShippingStreet = c.Account.ShippingStreet;
+        q.ShippingCity = c.Account.ShippingCity;
+        q.ShippingState = c.Account.ShippingState;
+        q.ShippingPostalCode = c.Account.ShippingPostalCode;
+        q.ShippingCountry = c.Account.ShippingCountry;
+    }
+
+    // A quote may only be touched by the customer contact it belongs to. When allowAdmin is true, an active Portal
+    // Account Admin of the same Account may also see it. When no contactId is supplied the call is an internal one
+    // (the old behaviour). A mismatch looks exactly like a missing quote.
+    private static void assertOwnedBy(Id quoteId, String contactId, Boolean allowAdmin) {
         if (String.isBlank(contactId)) return;
-        Integer n = [SELECT COUNT() FROM Quote WHERE Id = :quoteId AND ContactId = :contactId];
-        if (n == 0) throw new QuoteApiException('Quote not found: ' + quoteId);
+        Contact c = portalContact(contactId);
+        assertActive(c);
+        List<Quote> found = [SELECT ContactId, Contact.AccountId FROM Quote WHERE Id = :quoteId LIMIT 1];
+        Boolean ok = !found.isEmpty() && (
+            found[0].ContactId == c.Id ||
+            (allowAdmin && c.Portal_Account_Admin__c == true && found[0].Contact.AccountId == c.AccountId)
+        );
+        if (!ok) throw new QuoteApiException('Quote not found: ' + quoteId);
+    }
+
+    private static void checkCustomerTransition(Id quoteId, String newStatus) {
+        Set<String> allowedFrom = CUSTOMER_TRANSITIONS.get(newStatus);
+        Quote current = [SELECT Status, LineItemCount FROM Quote WHERE Id = :quoteId LIMIT 1];
+        if (allowedFrom == null || !allowedFrom.contains(current.Status)) {
+            throw new QuoteApiException('That action is not available for a quote that is "' + current.Status + '".');
+        }
+        if (newStatus == 'Needs Review' && (current.LineItemCount == null || current.LineItemCount < 1)) {
+            throw new QuoteApiException('Add at least one product before submitting the quote for review.');
+        }
     }
 
     // Opportunity rules for a signed-in customer:
@@ -538,16 +630,32 @@ global with sharing class QuoteRestController {
         return opp.Id;
     }
 
-    private static List<QuoteSummaryDTO> getQuoteList(Id contactId) {
+    private static List<QuoteSummaryDTO> getQuoteList(Id contactId, Boolean wholeAccount) {
+        Contact c = portalContact(contactId);
+        assertActive(c);
+        List<Quote> rows;
+        if (wholeAccount && c.Portal_Account_Admin__c == true) {
+            Id accountId = c.AccountId;
+            rows = [
+                SELECT Id, QuoteNumber, Name, Status, Quote_Source__c, GrandTotal, Subtotal, Tax, ShippingHandling, TotalPrice,
+                       CreatedDate, LineItemCount, CurrencyIsoCode, ContactId, Contact.Name
+                FROM Quote
+                WHERE Contact.AccountId = :accountId
+                ORDER BY CreatedDate DESC
+                LIMIT 200
+            ];
+        } else {
+            rows = [
+                SELECT Id, QuoteNumber, Name, Status, Quote_Source__c, GrandTotal, Subtotal, Tax, ShippingHandling, TotalPrice,
+                       CreatedDate, LineItemCount, CurrencyIsoCode, ContactId, Contact.Name
+                FROM Quote
+                WHERE ContactId = :c.Id
+                ORDER BY CreatedDate DESC
+                LIMIT 200
+            ];
+        }
         List<QuoteSummaryDTO> out = new List<QuoteSummaryDTO>();
-        for (Quote q : [
-            SELECT Id, QuoteNumber, Name, Status, Quote_Source__c, GrandTotal, Subtotal, Tax,
-                   ShippingHandling, TotalPrice, CreatedDate, LineItemCount, CurrencyIsoCode
-            FROM Quote
-            WHERE ContactId = :contactId
-            ORDER BY CreatedDate DESC
-            LIMIT 200
-        ]) {
+        for (Quote q : rows) {
             out.add(new QuoteSummaryDTO(q));
         }
         return out;
@@ -578,6 +686,7 @@ global with sharing class QuoteRestController {
     global class QuoteRequestWrapper {
         global String opportunityId;
         global String contactId;    // signed-in portal customer: the quote belongs to this contact
+        global String supersedes;   // id of the quote this one is a revision of (it becomes Superseded)
         global String currencyCode; // currency the customer is buying in (must match the Opportunity/Quote)
         global String name;
         global String status;
@@ -630,9 +739,13 @@ global with sharing class QuoteRestController {
         global Integer itemCount;
         global String createdDate;
         global String currencyCode;
+        global String ownerContactId;
+        global String ownerName;
 
         global QuoteSummaryDTO(Quote q) {
             this.currencyCode      = q.CurrencyIsoCode;
+            this.ownerContactId    = q.ContactId;
+            this.ownerName         = q.Contact.Name;
             this.id               = q.Id;
             this.quoteNumber      = q.QuoteNumber;
             this.name             = q.Name;

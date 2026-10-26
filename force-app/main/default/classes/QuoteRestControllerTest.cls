@@ -181,4 +181,131 @@ private class QuoteRestControllerTest {
         System.assertEquals(400, RestContext.response.statusCode);
         System.assertEquals(1, [SELECT COUNT() FROM QuoteLineItem WHERE QuoteId = :q.Id]);
     }
+
+    // ---------------------------------------------------------------- portal roles and quote actions
+
+    private static Contact colleague(Contact boss, String email, String access) {
+        Contact c = new Contact(AccountId = boss.AccountId, LastName = 'Mate', Email = email, Portal_Access__c = access);
+        insert c;
+        return c;
+    }
+
+    private static Contact adminOf(Contact c) {
+        c.Portal_Account_Admin__c = true;
+        update c;
+        return c;
+    }
+
+    private static Quote quoteWithLine(Contact c) {
+        Product2 p = new Product2(Name = 'Scanner ' + c.Email, IsActive = true);
+        insert p;
+        update new Pricebook2(Id = Test.getStandardPricebookId(), IsActive = true);
+        insert new PricebookEntry(Pricebook2Id = Test.getStandardPricebookId(), Product2Id = p.Id, UnitPrice = 10, IsActive = true, CurrencyIsoCode = UserInfo.getDefaultCurrency());
+        callPost(new Map<String, Object>{
+            'contactId' => c.Id,
+            'lineItems' => new List<Object>{ new Map<String, Object>{ 'productId' => p.Id, 'quantity' => 1, 'unitPrice' => 10 } }
+        });
+        System.assertEquals(201, RestContext.response.statusCode, RestContext.response.responseBody.toString());
+        return [SELECT Id, Status, OpportunityId FROM Quote WHERE ContactId = :c.Id ORDER BY CreatedDate DESC LIMIT 1];
+    }
+
+    @IsTest
+    static void pendingColleagueCannotListOrCreateQuotes() {
+        Contact boss = customer();
+        Contact pending = colleague(boss, 'pending@example.com', 'Pending');
+        callGet(null, pending.Id);
+        System.assertEquals(400, RestContext.response.statusCode);
+        System.assert(RestContext.response.responseBody.toString().contains('waiting for approval'));
+        callPost(new Map<String, Object>{ 'contactId' => pending.Id });
+        System.assertEquals(400, RestContext.response.statusCode);
+        System.assertEquals(0, [SELECT COUNT() FROM Quote]);
+    }
+
+    @IsTest
+    static void accountAdminSeesAllAccountQuotesOthersOnlyTheirOwn() {
+        Contact boss = adminOf(customer());
+        Contact mate = colleague(boss, 'mate@example.com', 'Active');
+        Quote bossQuote = newQuote(boss);
+        Quote mateQuote = newQuote(mate);
+
+        RestRequest rq = new RestRequest();
+        rq.requestURI = '/services/apexrest/api/quotes/';
+        rq.addParameter('contactId', boss.Id);
+        rq.addParameter('scope', 'account');
+        RestContext.request = rq;
+        RestContext.response = new RestResponse();
+        QuoteRestController.handleGet();
+        List<Object> all = (List<Object>) JSON.deserializeUntyped(RestContext.response.responseBody.toString());
+        System.assertEquals(2, all.size());
+
+        callGet(null, mate.Id); // the colleague, without scope, sees only their own
+        System.assertEquals(1, ((List<Object>) JSON.deserializeUntyped(RestContext.response.responseBody.toString())).size());
+
+        callGet(mateQuote.Id, boss.Id); // admin may open a colleague's quote
+        System.assertNotEquals(400, RestContext.response.statusCode);
+        callGet(bossQuote.Id, mate.Id); // a colleague may not open the admin's
+        System.assertEquals(400, RestContext.response.statusCode);
+        call('PATCH', mateQuote.Id, boss.Id, new Map<String, Object>{ 'notes' => 'x' }); // admin cannot silently edit it
+        System.assertEquals(400, RestContext.response.statusCode);
+    }
+
+    @IsTest
+    static void customerSubmitsAcceptsOrDeclinesAndOpportunityFollows() {
+        Contact c = customer();
+        Quote q = quoteWithLine(c);
+        System.assertEquals('Draft', q.Status);
+
+        call('PATCH', q.Id, c.Id, new Map<String, Object>{ 'status' => 'Accepted' });
+        System.assertEquals(400, RestContext.response.statusCode, 'a Draft cannot be accepted');
+
+        call('PATCH', q.Id, c.Id, new Map<String, Object>{ 'status' => 'Needs Review' });
+        System.assertNotEquals(400, RestContext.response.statusCode, RestContext.response.responseBody.toString());
+        System.assertEquals('Needs Review', [SELECT Status FROM Quote WHERE Id = :q.Id].Status);
+
+        call('PATCH', q.Id, c.Id, new Map<String, Object>{ 'lineItems' => new List<Object>() });
+        System.assertEquals(400, RestContext.response.statusCode, 'locked once submitted');
+
+        update new Quote(Id = q.Id, Status = 'Approved'); // the Salesforce team approves
+        Test.startTest();
+        call('PATCH', q.Id, c.Id, new Map<String, Object>{ 'status' => 'Accepted' });
+        Test.stopTest();
+        System.assertEquals('Accepted', [SELECT Status FROM Quote WHERE Id = :q.Id].Status);
+        System.assertEquals('Closed Won', [SELECT StageName FROM Opportunity WHERE Id = :q.OpportunityId].StageName);
+    }
+
+    @IsTest
+    static void customerCanDeclineAndOpportunityClosesLost() {
+        Contact c = customer();
+        Quote q = quoteWithLine(c);
+        Test.startTest();
+        call('PATCH', q.Id, c.Id, new Map<String, Object>{ 'status' => 'Denied', 'notes' => 'Not interested: price' });
+        Test.stopTest();
+        System.assertEquals('Denied', [SELECT Status FROM Quote WHERE Id = :q.Id].Status);
+        System.assertEquals('Closed Lost', [SELECT StageName FROM Opportunity WHERE Id = :q.OpportunityId].StageName);
+    }
+
+    @IsTest
+    static void submittingAnEmptyQuoteIsRefused() {
+        Contact c = customer();
+        Quote q = newQuote(c);
+        call('PATCH', q.Id, c.Id, new Map<String, Object>{ 'status' => 'Needs Review' });
+        System.assertEquals(400, RestContext.response.statusCode);
+    }
+
+    @IsTest
+    static void revisionSupersedesTheOldQuoteAndAddressesAreCopied() {
+        Contact c = customer();
+        update new Account(Id = c.AccountId, BillingCity = 'Leeds', BillingCountry = 'United Kingdom', ShippingCity = 'York', ShippingCountry = 'United Kingdom');
+        Quote first = quoteWithLine(c);
+        Quote created = [SELECT BillingCity, ShippingCity, BillingName FROM Quote WHERE Id = :first.Id];
+        System.assertEquals('Leeds', created.BillingCity);
+        System.assertEquals('York', created.ShippingCity);
+        System.assertEquals('Acme', created.BillingName);
+
+        update new Quote(Id = first.Id, Status = 'Approved');
+        callPost(new Map<String, Object>{ 'contactId' => c.Id, 'opportunityId' => first.OpportunityId, 'supersedes' => first.Id });
+        System.assertEquals(201, RestContext.response.statusCode, RestContext.response.responseBody.toString());
+        System.assertEquals('Superseded', [SELECT Status FROM Quote WHERE Id = :first.Id].Status);
+        System.assertEquals(2, [SELECT COUNT() FROM Quote WHERE OpportunityId = :first.OpportunityId], 'the revision is on the same opportunity');
+    }
 }

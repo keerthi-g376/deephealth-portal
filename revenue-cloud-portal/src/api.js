@@ -29,7 +29,10 @@ export const api = {
   getQuote: (id) => request(`/api/quotes/${id}`),
   createQuote: (lineItems, { currency, reviseFrom } = {}) =>
     request('/api/quotes', { method: 'POST', body: JSON.stringify({ lineItems, currency, reviseFrom }) }),
-  myQuotes: () => request('/api/my/quotes'),
+  myQuotes: (scope) => request(`/api/my/quotes${scope === 'account' ? '?scope=account' : ''}`),
+  quoteAction: (id, action, reason) => request(`/api/quotes/${id}/${action}`, { method: 'POST', body: JSON.stringify({ reason }) }),
+  getProfile: () => request('/api/profile'),
+  saveProfile: (profile) => request('/api/profile', { method: 'PUT', body: JSON.stringify(profile) }),
   quoteAsCart: (id) => request(`/api/quotes/${id}/cart`),
   me: () => request('/api/auth/me'),
   requestCode: (email) => request('/api/auth/request', { method: 'POST', body: JSON.stringify({ email }) }),

@@ -6,49 +6,152 @@ private class PortalCustomerServiceTest {
         return r;
     }
 
-    @IsTest
-    static void existingContactIsReturned() {
+    private static PortalCustomerService.Address address() {
+        PortalCustomerService.Address a = new PortalCustomerService.Address();
+        a.street = '1 Main St';
+        a.city = 'Leeds';
+        a.postalCode = 'LS1';
+        a.country = 'United Kingdom';
+        return a;
+    }
+
+    private static PortalCustomerService.CustomerRequest fullProfile(String email, String company) {
+        PortalCustomerService.CustomerRequest r = req(email);
+        r.firstName = 'Ann';
+        r.lastName = 'New';
+        r.company = company;
+        r.billing = address();
+        return r;
+    }
+
+    private static Contact existingCustomer() {
         Account a = new Account(Name = 'Acme');
         insert a;
-        Contact c = new Contact(AccountId = a.Id, LastName = 'Doe', Email = 'doe@example.com');
+        Contact c = new Contact(AccountId = a.Id, FirstName = 'Dee', LastName = 'Doe', Email = 'doe@acme.com');
         insert c;
-        Map<String, Object> out = PortalCustomerService.resolve(req('doe@example.com'));
-        System.assertEquals(c.Id, (Id) out.get('contactId'));
-        System.assertEquals(a.Id, (Id) out.get('accountId'));
+        return c;
     }
 
     @IsTest
-    static void openLeadIsConvertedWithoutOpportunity() {
-        insert new Lead(LastName = 'Lead', Company = 'LeadCo', Email = 'lead@example.com');
-        Map<String, Object> out = PortalCustomerService.resolve(req('lead@example.com'));
-        System.assertNotEquals(null, out.get('contactId'));
-        System.assertEquals(1, [SELECT COUNT() FROM Lead WHERE Email = 'lead@example.com' AND IsConverted = true]);
+    static void existingContactSignsInAsActive() {
+        Contact c = existingCustomer();
+        Map<String, Object> out = PortalCustomerService.resolve(req('DOE@acme.com '.trim().toLowerCase()));
+        System.assertEquals(c.Id, (Id) out.get('contactId'));
+        System.assertEquals(c.AccountId, (Id) out.get('accountId'));
+        System.assertEquals('Active', out.get('access'));
+        System.assertEquals(false, out.get('isAdmin'));
+    }
+
+    @IsTest
+    static void newCompanyNeedsProfileThenBecomesAdmin() {
+        System.assertEquals(true, PortalCustomerService.resolve(req('ann@newco.com')).get('needsProfile'));
+        System.assertEquals(false, PortalCustomerService.resolve(req('ann@newco.com')).get('domainMatch'));
+
+        Map<String, Object> out = PortalCustomerService.resolve(fullProfile('ann@newco.com', 'NewCo'));
+        System.assertEquals('Active', out.get('access'));
+        System.assertEquals(true, out.get('isAdmin'));
+        Account acc = [SELECT Name, BillingCity, ShippingCity FROM Account WHERE Id = :(Id) out.get('accountId')];
+        System.assertEquals('NewCo', acc.Name);
+        System.assertEquals('Leeds', acc.BillingCity);
+        System.assertEquals('Leeds', acc.ShippingCity, 'shipping defaults to billing');
+    }
+
+    @IsTest
+    static void individualGetsPlaceholderAccount() {
+        PortalCustomerService.CustomerRequest r = fullProfile('solo@gmail.com', null);
+        r.individual = true;
+        Map<String, Object> out = PortalCustomerService.resolve(r);
+        System.assertEquals('Individual - Ann New', [SELECT Name FROM Account WHERE Id = :(Id) out.get('accountId')].Name);
+    }
+
+    @IsTest
+    static void leadWaitsForProfileThenConvertsWithoutOpportunity() {
+        insert new Lead(LastName = 'Lead', Company = 'LeadCo', Email = 'lead@leadco.com');
+        System.assertEquals(true, PortalCustomerService.resolve(req('lead@leadco.com')).get('needsProfile'));
+        System.assertEquals(0, [SELECT COUNT() FROM Lead WHERE IsConverted = true]);
+
+        Map<String, Object> out = PortalCustomerService.resolve(fullProfile('lead@leadco.com', 'LeadCo Ltd'));
+        System.assertEquals(true, out.get('isAdmin'));
+        System.assertEquals(1, [SELECT COUNT() FROM Lead WHERE IsConverted = true]);
         System.assertEquals(0, [SELECT COUNT() FROM Opportunity]);
+        System.assertEquals('LeadCo Ltd', [SELECT Name FROM Account WHERE Id = :(Id) out.get('accountId')].Name);
     }
 
     @IsTest
     static void leadIsConvertedIntoExistingContact() {
-        Account a = new Account(Name = 'Acme');
-        insert a;
-        Contact c = new Contact(AccountId = a.Id, LastName = 'Doe', Email = 'both@example.com');
-        insert c;
+        Contact c = existingCustomer();
         Database.DMLOptions opts = new Database.DMLOptions();
         opts.duplicateRuleHeader.allowSave = true;
-        Database.insert(new Lead(LastName = 'Doe', Company = 'Acme', Email = 'both@example.com'), opts);
-        Map<String, Object> out = PortalCustomerService.resolve(req('both@example.com'));
+        Database.insert(new Lead(LastName = 'Doe', Company = 'Acme', Email = 'doe@acme.com'), opts);
+        Map<String, Object> out = PortalCustomerService.resolve(req('doe@acme.com'));
         System.assertEquals(c.Id, (Id) out.get('contactId'));
-        System.assertEquals(1, [SELECT COUNT() FROM Contact WHERE Email = 'both@example.com']);
+        System.assertEquals(1, [SELECT COUNT() FROM Contact WHERE Email = 'doe@acme.com']);
+        System.assertEquals(1, [SELECT COUNT() FROM Lead WHERE IsConverted = true]);
     }
 
     @IsTest
-    static void unknownEmailNeedsProfileThenCreates() {
-        System.assertEquals(true, PortalCustomerService.resolve(req('new@example.com')).get('needsProfile'));
-        PortalCustomerService.CustomerRequest r = req('new@example.com');
-        r.lastName = 'New';
-        r.company = 'NewCo';
+    static void colleagueOnSameDomainWaitsForApproval() {
+        Contact c = existingCustomer();
+        System.assertEquals(true, PortalCustomerService.resolve(req('new@acme.com')).get('domainMatch'));
+
+        PortalCustomerService.CustomerRequest r = req('new@acme.com');
+        r.firstName = 'Nina';
+        r.lastName = 'Newcomer';
         Map<String, Object> out = PortalCustomerService.resolve(r);
-        System.assertNotEquals(null, out.get('contactId'));
-        System.assertEquals(1, [SELECT COUNT() FROM Account WHERE Name = 'NewCo']);
+        System.assertEquals(c.AccountId, (Id) out.get('accountId'), 'attached to the existing account');
+        System.assertEquals('Pending', out.get('access'));
+        System.assertEquals(false, out.get('isAdmin'));
+        System.assertEquals(1, [SELECT COUNT() FROM Task WHERE WhatId = :c.AccountId], 'account owner is asked to approve');
+        System.assertEquals(1, [SELECT COUNT() FROM Account WHERE Name = 'Acme']);
+    }
+
+    @IsTest
+    static void companyNameMatchAlsoWaitsForApproval() {
+        Contact c = existingCustomer();
+        PortalCustomerService.CustomerRequest r = fullProfile('person@gmail.com', 'Acme');
+        Map<String, Object> out = PortalCustomerService.resolve(r);
+        System.assertEquals(c.AccountId, (Id) out.get('accountId'));
+        System.assertEquals('Pending', out.get('access'));
+    }
+
+    @IsTest
+    static void freeMailDomainNeverMatchesAnAccount() {
+        Account a = new Account(Name = 'Gmail Fan');
+        insert a;
+        insert new Contact(AccountId = a.Id, LastName = 'Fan', Email = 'fan@gmail.com');
+        Map<String, Object> out = PortalCustomerService.resolve(req('stranger@gmail.com'));
+        System.assertEquals(false, out.get('domainMatch'));
+        System.assertEquals(true, out.get('needsProfile'));
+    }
+
+    @IsTest
+    static void profileIsEditableAndAccountAddressOnlyByAdmin() {
+        Map<String, Object> adminOut = PortalCustomerService.resolve(fullProfile('boss@bossco.com', 'BossCo'));
+        Id adminId = (Id) adminOut.get('contactId');
+
+        PortalCustomerService.CustomerRequest save = new PortalCustomerService.CustomerRequest();
+        save.contactId = adminId;
+        save.firstName = 'Bo';
+        save.lastName = 'Boss';
+        save.phone = '123';
+        save.billing = address();
+        save.billing.city = 'York';
+        PortalCustomerService.saveProfile(save);
+        System.assertEquals('York', [SELECT BillingCity FROM Account WHERE Name = 'BossCo'].BillingCity);
+        System.assertEquals('123', [SELECT Phone FROM Contact WHERE Id = :adminId].Phone);
+
+        PortalCustomerService.CustomerRequest mate = req('mate@bossco.com');
+        mate.firstName = 'Mate';
+        mate.lastName = 'Mate';
+        Id mateId = (Id) PortalCustomerService.resolve(mate).get('contactId');
+        PortalCustomerService.CustomerRequest edit = new PortalCustomerService.CustomerRequest();
+        edit.contactId = mateId;
+        edit.lastName = 'Mate2';
+        edit.billing = address();
+        edit.billing.city = 'Hacked';
+        PortalCustomerService.saveProfile(edit);
+        System.assertEquals('York', [SELECT BillingCity FROM Account WHERE Name = 'BossCo'].BillingCity, 'a colleague cannot change the account address');
+        System.assertEquals('Mate2', [SELECT LastName FROM Contact WHERE Id = :mateId].LastName);
     }
 
     @IsTest
@@ -76,12 +179,17 @@ private class PortalCustomerServiceTest {
 
     @IsTest
     static void restEntryPointRoutesAndRejects() {
-        post('resolve', new Map<String, Object>{ 'email' => 'nobody@example.com' });
+        Contact c = existingCustomer();
+        post('resolve', new Map<String, Object>{ 'email' => 'nobody@nowhere.org' });
         System.assertEquals(200, RestContext.response.statusCode);
         System.assert(RestContext.response.responseBody.toString().contains('needsProfile'));
-        post('mail', new Map<String, Object>{ 'email' => 'nobody@example.com', 'code' => '123456' });
+        post('mail', new Map<String, Object>{ 'email' => 'nobody@nowhere.org', 'code' => '123456' });
         System.assertEquals(200, RestContext.response.statusCode);
-        post('bogus', new Map<String, Object>{ 'email' => 'nobody@example.com' });
+        post('status', new Map<String, Object>{ 'contactId' => c.Id });
+        System.assert(RestContext.response.responseBody.toString().contains('Active'));
+        post('profile', new Map<String, Object>{ 'contactId' => c.Id });
+        System.assertEquals(200, RestContext.response.statusCode);
+        post('bogus', new Map<String, Object>{ 'email' => 'nobody@nowhere.org' });
         System.assertEquals(400, RestContext.response.statusCode);
         post('resolve', new Map<String, Object>{ 'email' => '' });
         System.assertEquals(400, RestContext.response.statusCode);

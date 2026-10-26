@@ -10,7 +10,9 @@ import ConfigurePage from './components/ConfigurePage.jsx';
 import ProductCard from './components/ProductCard.jsx';
 import QuotePage from './components/QuotePage.jsx';
 import LeadForm from './components/LeadForm.jsx';
+import MyProfile from './components/MyProfile.jsx';
 import MyQuotes from './components/MyQuotes.jsx';
+import NextStep from './components/NextStep.jsx';
 import SignInModal from './components/SignInModal.jsx';
 import Toasts from './components/Toasts.jsx';
 import { moneyWhole, setDisplayCurrency } from './format.js';
@@ -190,11 +192,13 @@ function Storefront({ catalog, geo }) {
   const isQuoteRoute = route.name === 'quote';
   const isCartRoute = route.name === 'cart';
   const isQuotesRoute = route.name === 'quotes';
-  const onDetail = isBundleRoute || isConfigureRoute || isQuoteRoute || isCartRoute || isQuotesRoute;
+  const isProfileRoute = route.name === 'profile';
+  const onDetail = isBundleRoute || isConfigureRoute || isQuoteRoute || isCartRoute || isQuotesRoute || isProfileRoute;
 
   let detail = null;
   if (onDetail) {
-    if (isQuotesRoute) detail = <MyQuotes onLoaded={geo.syncCurrency} />;
+    if (isProfileRoute) detail = <MyProfile />;
+    else if (isQuotesRoute) detail = <MyQuotes onLoaded={geo.syncCurrency} />;
     else if (isQuoteRoute) detail = <QuotePage onBack={back} />;
     else if (isCartRoute) detail = <CartPage byId={byId} />;
     else if (catalog.status === 'loading') detail = <p className="state">Loading from Salesforce…</p>;
@@ -256,6 +260,7 @@ function Storefront({ catalog, geo }) {
           {auth.user ? (
             <>
               <a className="view-all" href="#/quotes">My Quotations</a>
+              <a className="view-all" href="#/profile">My Profile</a>
               <button className="account" title="Sign out" onClick={auth.signOut}>
                 <span className="avatar">{initialsOf(auth.user.name)}</span>
                 <span className="account-text">
@@ -275,6 +280,7 @@ function Storefront({ catalog, geo }) {
           detail
         ) : (
           <>
+            <NextStep />
             <div className="title-row">
               <h1 className="title">Products</h1>
               <button className="view-all" onClick={resetFilters}>

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Portal_Account_Admin__c</fullName>
+    <defaultValue>false</defaultValue>
+    <description>Portal Account Admin: can see all quotes of the Account in the customer portal.</description>
+    <label>Portal Account Admin</label>
+    <trackTrending>false</trackTrending>
+    <type>Checkbox</type>
+</CustomField>
