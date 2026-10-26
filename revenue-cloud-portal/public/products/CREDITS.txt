@@ -1,2 +1,2 @@
-Product images: photos from Unsplash (free to use under the Unsplash License, no attribution required) and one CC0 MRI image from Wikimedia Commons.
-No third-party brand names or logos. Replace with your own photography when available.
+Product images: photos from Unsplash (Unsplash License, no attribution required) plus public-domain / CC0 medical images from Wikimedia Commons (mammograms, MRI, chest CT).
+No faces and no brand names or logos. Replace with your own photography when available.
