@@ -9,7 +9,6 @@ import ChatWidget from './components/ChatWidget.jsx';
 import ConfigurePage from './components/ConfigurePage.jsx';
 import ProductCard from './components/ProductCard.jsx';
 import QuotePage from './components/QuotePage.jsx';
-import LeadForm from './components/LeadForm.jsx';
 import MyProfile from './components/MyProfile.jsx';
 import MyQuotes from './components/MyQuotes.jsx';
 import NextStep from './components/NextStep.jsx';
@@ -124,7 +123,6 @@ function useRoute() {
 
 function Storefront({ catalog, geo }) {
   const cart = useCart();
-  const [leadOpen, setLeadOpen] = useState(false);
   const auth = useAuth();
   const { route, back } = useRoute();
   const [query, setQuery] = useState('');
@@ -246,9 +244,6 @@ function Storefront({ catalog, geo }) {
               </option>
             ))}
           </Chip>
-          <button className="cart-pill" onClick={() => setLeadOpen(true)}>
-            I'm interested
-          </button>
           <button className="cart-pill" onClick={() => setCartOpen(true)}>
             <CartIcon width={16} height={16} />
             Cart
@@ -392,7 +387,6 @@ function Storefront({ catalog, geo }) {
 
       <Cart open={cartOpen} onClose={closeCart} byId={byId} />
       {catalog.status === 'ready' && <ChatWidget products={products} byId={byId} />}
-      {leadOpen && <LeadForm countries={geo.countries} country={geo.country} products={products} onClose={() => setLeadOpen(false)} />}
       <SignInModal countryCode={geo.country?.code ?? ''} />
       <Toasts />
     </>
