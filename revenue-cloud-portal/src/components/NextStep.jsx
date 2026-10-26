@@ -5,22 +5,19 @@ const STEPS = ['Sign in', 'Choose products', 'Create quote', 'Review', 'Accept']
 
 // Tells the customer where they are and what to do next, from their sign-in state, cart and quote status.
 export default function NextStep() {
-  const { user, ready, openSignIn } = useAuth();
+  const { user, ready } = useAuth();
   const { items, quote, dirty } = useCart();
   if (!ready) return null;
 
   let step = 0;
-  let text = 'Sign in with your email to start. Browsing prices does not need an account.';
-  let action = { label: 'Sign in', run: openSignIn };
+  let text = 'Click Sign in (top right) with your email to start. Browsing prices does not need an account.';
 
   if (user?.access && user.access !== 'Active') {
     step = 1;
     text = 'Your access is waiting for approval from your account owner. You can browse prices, but you cannot create quotes yet.';
-    action = null;
   } else if (user && !quote) {
     step = items.length ? 2 : 1;
     text = items.length ? `You have ${items.length} product${items.length === 1 ? '' : 's'} in the cart. Open the cart and click Create Quote.` : 'You are signed in. Add products to the cart to start your quotation.';
-    action = null;
   } else if (user && quote) {
     const s = quote.status;
     if (s === 'Draft') {
@@ -39,7 +36,6 @@ export default function NextStep() {
       step = 3;
       text = `Quote #${quote.quoteNumber} is ${s}. Open My Quotations to revise it or start a new one.`;
     }
-    action = null;
   }
 
   return (
@@ -52,7 +48,7 @@ export default function NextStep() {
         ))}
       </ol>
       <p style={{ margin: 0 }}>
-        {text} {action && <button className="btn-coral" style={{ marginLeft: 8 }} onClick={action.run}>{action.label}</button>}
+        {text}
       </p>
     </div>
   );
