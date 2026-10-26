@@ -49,6 +49,7 @@ export default function SignInModal({ countryCode }) {
     const d = await api.verifyCode({
       ...f,
       country: countryCode,
+      joinExisting: !!colleague,
       billing: colleague ? null : billing,
       shipping: colleague ? null : sameAsBilling ? billing : shipping,
     });
@@ -89,9 +90,15 @@ export default function SignInModal({ countryCode }) {
           {step === 'profile' && (
             <form onSubmit={verify} style={{ display: 'grid', gap: 8 }}>
               {colleague ? (
-                <p className="note">
-                  <strong>{colleague.accountName}</strong> already has an account with us. After you register, its account owner approves your access. Until then you can browse prices but not create quotes.
-                </p>
+<>
+                  <p role="alert" style={{ margin: 0, fontWeight: 700 }}>An account for {colleague.accountName} already exists.</p>
+                  <p className="note">
+                    Enter your contact details to request access. Its account owner approves you (we will email you a confirmation). Until then you can browse prices but not create quotes.
+                  </p>
+                  <button type="button" className="btn-soft" onClick={() => { setColleague(null); setF((x) => ({ ...x, company: '' })); }}>
+                    Use a different company name
+                  </button>
+                </>
               ) : (
                 <p className="note">Welcome! Tell us who you are. Your company and addresses are used on your quotes.</p>
               )}

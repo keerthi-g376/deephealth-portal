@@ -109,9 +109,29 @@ private class PortalCustomerServiceTest {
     static void companyNameMatchAlsoWaitsForApproval() {
         Contact c = existingCustomer();
         PortalCustomerService.CustomerRequest r = fullProfile('person@gmail.com', 'Acme');
+        Map<String, Object> ask = PortalCustomerService.resolve(r);
+        System.assertEquals(true, ask.get('needsProfile'), 'the person is first told the company already exists');
+        System.assertEquals(true, ask.get('byName'));
+        System.assertEquals('Acme', ask.get('accountName'));
+        System.assertEquals(1, [SELECT COUNT() FROM Contact WHERE AccountId = :c.AccountId], 'nothing created yet');
+        r.joinExisting = true;
         Map<String, Object> out = PortalCustomerService.resolve(r);
         System.assertEquals(c.AccountId, (Id) out.get('accountId'));
         System.assertEquals('Pending', out.get('access'));
+    }
+
+    @IsTest
+    static void emptyExistingAccountMakesTheFirstPersonItsAdmin() {
+        Account a = new Account(Name = 'Ghost Clinic');
+        insert a;
+        PortalCustomerService.CustomerRequest r = fullProfile('first@gmail.com', 'Ghost Clinic');
+        System.assertEquals(true, PortalCustomerService.resolve(r).get('byName'), 'told the company already exists first');
+        r.joinExisting = true;
+        Map<String, Object> out = PortalCustomerService.resolve(r);
+        System.assertEquals(a.Id, (Id) out.get('accountId'), 'attached to the existing empty account');
+        System.assertEquals('Active', out.get('access'));
+        System.assertEquals(true, out.get('isAdmin'));
+        System.assertEquals(1, [SELECT COUNT() FROM Account WHERE Name = 'Ghost Clinic']);
     }
 
     @IsTest

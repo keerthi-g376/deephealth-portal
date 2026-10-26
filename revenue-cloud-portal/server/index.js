@@ -312,6 +312,7 @@ app.post(
       phone: text(b.phone, 40),
       company: text(b.company, 255),
       individual: b.individual === true,
+      joinExisting: b.joinExisting === true,
       country: countryByCode(b.country)?.name ?? '',
       billing: cleanAddress(b.billing),
       shipping: cleanAddress(b.shipping),

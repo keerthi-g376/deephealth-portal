@@ -35,6 +35,7 @@ global with sharing class PortalCustomerService {
         public String company;
         public String country;
         public Boolean individual;
+        public Boolean joinExisting; // the person confirmed they want to join the existing company found by name
         public Address billing;
         public Address shipping;
     }
@@ -103,8 +104,11 @@ global with sharing class PortalCustomerService {
 
     // The Account a new person most likely belongs to: the Account with the most Contacts on the same company email
     // domain, else an Account whose name equals the typed company. Free-mail domains never match.
+    private static Boolean lastMatchWasDomain = false;
+
     @TestVisible
     private static Account findAccount(String email, String company) {
+        lastMatchWasDomain = false;
         String domain = email.substringAfter('@');
         if (!FREE_DOMAINS.contains(domain) && !domain.contains('%') && !domain.contains('_')) {
             String pattern = '%@' + domain;
@@ -117,6 +121,7 @@ global with sharing class PortalCustomerService {
                 LIMIT 1
             ];
             if (!hits.isEmpty()) {
+                lastMatchWasDomain = true;
                 Id accId = (Id) hits[0].get('a');
                 return [SELECT Id, Name, OwnerId FROM Account WHERE Id = :accId LIMIT 1];
             }
@@ -187,6 +192,20 @@ global with sharing class PortalCustomerService {
         }
     }
 
+    private static void confirmRequest(Account acc, Contact c) {
+        try {
+            Messaging.SingleEmailMessage mail = new Messaging.SingleEmailMessage();
+            mail.setToAddresses(new List<String>{ c.Email });
+            mail.setSaveAsActivity(false);
+            mail.setSubject('Your request to join ' + acc.Name + ' on the CareSphere portal');
+            mail.setPlainTextBody('Hello ' + c.FirstName + ',\n\n' + acc.Name + ' already has an account with us, so we sent your request to its account owner. '
+                + 'You can sign in and browse prices now; you will be able to create quotes once the request is approved.');
+            Messaging.sendEmail(new List<Messaging.SingleEmailMessage>{ mail });
+        } catch (Exception ex) {
+            System.debug(LoggingLevel.WARN, 'Confirmation email failed: ' + ex.getMessage());
+        }
+    }
+
     // ---------------------------------------------------------------- resolve
 
     @TestVisible
@@ -212,7 +231,12 @@ global with sharing class PortalCustomerService {
         }
 
         Account match = findAccount(req.email, req.company);
-        if (match != null) {
+        if (match != null && !lastMatchWasDomain && req.joinExisting != true && leads.isEmpty()) {
+            // matched only by the typed company name: say so and ask for contact details before attaching anyone
+            return new Map<String, Object>{ 'needsProfile' => true, 'domainMatch' => true, 'byName' => true, 'accountName' => match.Name };
+        }
+        Boolean emptyAccount = match != null && [SELECT COUNT() FROM Contact WHERE AccountId = :match.Id] == 0;
+        if (match != null && !emptyAccount) {
             // a colleague of an existing company: needs only a name, and waits for the Account Owner
             Id contactId;
             if (!leads.isEmpty()) {
@@ -225,8 +249,26 @@ global with sharing class PortalCustomerService {
                 return new Map<String, Object>{ 'needsProfile' => true, 'domainMatch' => true, 'accountName' => match.Name };
             }
             update as user new Contact(Id = contactId, Portal_Access__c = 'Pending', Portal_Account_Admin__c = false);
-            notifyOwner(match, [SELECT Id, FirstName, LastName, Email FROM Contact WHERE Id = :contactId]);
+            Contact joined = [SELECT Id, FirstName, LastName, Email FROM Contact WHERE Id = :contactId];
+            notifyOwner(match, joined);
+            confirmRequest(match, joined);
             return payload(contactId);
+        }
+        if (emptyAccount) {
+            // nobody on this Account can approve anyone, so the first person to register becomes its Account Admin
+            Id firstId;
+            if (!leads.isEmpty()) {
+                firstId = convertLead(leads[0].Id, match.Id, null);
+            } else if (String.isNotBlank(req.lastName)) {
+                Contact first = new Contact(AccountId = match.Id, FirstName = req.firstName, LastName = req.lastName, Email = req.email, Phone = req.phone, LeadSource = 'Web');
+                Database.insert(first, allowDuplicates(), AccessLevel.USER_MODE);
+                firstId = first.Id;
+            } else {
+                return new Map<String, Object>{ 'needsProfile' => true, 'domainMatch' => false };
+            }
+            Contact firstAdmin = new Contact(Id = firstId, Portal_Access__c = 'Active', Portal_Account_Admin__c = true);
+            update as user firstAdmin;
+            return payload(firstId);
         }
 
         // a new company: name, company (or "individual") and a billing address are required
