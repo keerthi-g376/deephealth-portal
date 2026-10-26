@@ -106,7 +106,9 @@ async function buildQuoteBody(rawItems, { requireItems, currency }) {
     seen.add(key);
     // the price may depend on the attribute values chosen (Salesforce Attribute Based Adjustments)
     const chosen = Object.fromEntries(attributes.map((a) => [a.definitionId, a.value]));
-    return { lineId, parentLineId, productId, product, quantity, unitPrice: adjustedPrice(product, chosen), attributes };
+    // a bundle has no price of its own (same rule as the cart): its price is the total of its component lines
+    const unitPrice = product.isBundle ? 0 : adjustedPrice(product, chosen);
+    return { lineId, parentLineId, productId, product, quantity, unitPrice, attributes };
   });
 
   // bundle structure: every parent must be a bundle line in this cart that lists the child as a component
