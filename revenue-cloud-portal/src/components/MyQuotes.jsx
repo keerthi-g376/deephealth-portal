@@ -7,16 +7,15 @@ import Breadcrumb from './Breadcrumb.jsx';
 
 const POLL_MS = 45_000; // status changes made in Salesforce show up without a reload
 
-// "My Quotations": only the signed-in customer's own quotes. Draft = edit in place; any later status = view,
-// or Revise (the lines become a new quote on the same Opportunity).
+// "My Quotations": only the signed-in customer's own quotes (an Account Admin can show the whole Account).
+// Edit opens the quote's details: line items, addresses and the other quote details. A Draft is also loaded into
+// the cart, where Update Quote saves changes; any later status is shown read-only.
 export default function MyQuotes({ onLoaded }) {
   const { user, ready, openSignIn } = useAuth();
   const cart = useCart();
   const [state, setState] = useState({ status: 'loading', quotes: [], error: '' });
   const [busyId, setBusyId] = useState('');
-  const [scope, setScope] = useState('mine'); // an Account Admin can switch to the whole Account
-  const [declining, setDeclining] = useState(null); // quote being declined
-  const [reason, setReason] = useState('Price');
+  const [scope, setScope] = useState('mine');
 
   const load = useCallback(() => {
     api
@@ -32,29 +31,21 @@ export default function MyQuotes({ onLoaded }) {
     return () => clearInterval(timer);
   }, [user, load]);
 
-  const open_ = async (q, mode) => {
-    if (cart.items.length && !window.confirm('This replaces the products currently in your cart. Continue?')) return;
-    setBusyId(q.id);
-    try {
-      const data = await api.quoteAsCart(q.id);
-      onLoaded?.(data.currency);
-      cart.loadQuote(data, mode);
-      cart.notify('success', mode === 'edit' ? `Quote #${q.quoteNumber} loaded - change it in the cart.` : `Revision of #${q.quoteNumber} started - review the cart and create the new quote.`);
-      window.location.hash = '#/';
-    } catch (e) {
-      cart.notify('error', e.message);
-    } finally {
-      setBusyId('');
+  const edit = async (q) => {
+    const own = !q.ownerContactId || q.ownerContactId === user.contactId;
+    if (q.status !== 'Draft' || !own) {
+      window.location.hash = `#/quote/${q.id}`; // read-only details
+      return;
     }
-  };
-
-  const act = async (q, action, why) => {
+    if (cart.quote?.id !== q.id && cart.items.length && !window.confirm('This replaces the products currently in your cart. Continue?')) return;
     setBusyId(q.id);
     try {
-      await api.quoteAction(q.id, action, why);
-      cart.notify('success', action === 'submit' ? `Quote #${q.quoteNumber} submitted for review.` : action === 'accept' ? `Quote #${q.quoteNumber} accepted. Our team will process your order.` : `Quote #${q.quoteNumber} closed. Thank you for letting us know.`);
-      setDeclining(null);
-      load();
+      if (cart.quote?.id !== q.id) {
+        const data = await api.quoteAsCart(q.id);
+        onLoaded?.(data.currency);
+        cart.loadQuote(data, 'edit');
+      }
+      window.location.hash = `#/quote/${q.id}`;
     } catch (e) {
       cart.notify('error', e.message);
     } finally {
@@ -71,23 +62,6 @@ export default function MyQuotes({ onLoaded }) {
       </div>
     );
   }
-
-  const mine = (q) => q.ownerContactId === user.contactId || !q.ownerContactId || scope !== 'account';
-  const actions = (q) => {
-    const st = q.status;
-    const busy = busyId === q.id;
-    const open = ['Draft', 'Needs Review', 'In Review', 'Approved', 'Presented', 'Rejected'].includes(st);
-    return (
-      <>
-        {st === 'Draft' && <button className="btn-coral" disabled={busy} onClick={() => open_(q, 'edit')}>Edit</button>}
-        {st === 'Draft' && <button className="btn-outline" disabled={busy} onClick={() => act(q, 'submit')}>Submit for review</button>}
-        {['Approved', 'Presented'].includes(st) && <button className="btn-coral" disabled={busy} onClick={() => act(q, 'accept')}>Accept quote</button>}
-        {st !== 'Draft' && <button className="btn-soft" disabled={busy} onClick={() => open_(q, 'edit')}>View</button>}
-        {['Needs Review', 'In Review', 'Approved', 'Presented', 'Rejected'].includes(st) && <button className="btn-outline" disabled={busy} onClick={() => open_(q, 'revise')}>Revise</button>}
-        {open && <button className="btn-soft" disabled={busy} onClick={() => setDeclining(q)}>Not interested</button>}
-      </>
-    );
-  };
 
   return (
     <section className="detail">
@@ -110,32 +84,15 @@ export default function MyQuotes({ onLoaded }) {
           <li className="quote-line" key={q.id}>
             <div className="line-info">
               <strong>Quote #{q.quoteNumber}</strong>
-              <small>{[q.status, q.createdDate, `${q.itemCount} item${q.itemCount === 1 ? '' : 's'}`].join(' · ')}</small>
+              <small>{[q.status, q.createdDate, `${q.itemCount} item${q.itemCount === 1 ? '' : 's'}`, scope === 'account' ? q.ownerName : ''].filter(Boolean).join(' · ')}</small>
             </div>
             <span className="line-total">{money(q.grandTotal, q.currencyCode)}</span>
-            <div className="comp-actions" style={{ flexWrap: 'wrap' }}>
-              {mine(q) ? actions(q) : <small>View only</small>}
+            <div className="comp-actions">
+              <button className="btn-coral" disabled={busyId === q.id} onClick={() => edit(q)}>Edit</button>
             </div>
           </li>
         ))}
       </ul>
-      {declining && (
-        <div className="modal-scrim" onClick={() => setDeclining(null)}>
-          <div className="modal" role="dialog" aria-label="Not interested" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-head"><h2>Not interested</h2></div>
-            <div className="modal-body" style={{ display: 'grid', gap: 8 }}>
-              <p className="note">Quote #{declining.quoteNumber} will be closed. Why?</p>
-              <select className="field" value={reason} onChange={(e) => setReason(e.target.value)}>
-                {['Price', 'Timing', 'Chose another vendor', 'No longer needed', 'Other'].map((r) => (
-                  <option key={r}>{r}</option>
-                ))}
-              </select>
-              <button className="btn-coral" disabled={busyId === declining.id} onClick={() => act(declining, 'decline', reason)}>Close this quote</button>
-              <button className="btn-soft" onClick={() => setDeclining(null)}>Cancel</button>
-            </div>
-          </div>
-        </div>
-      )}
     </section>
   );
 }

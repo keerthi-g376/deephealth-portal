@@ -30,7 +30,6 @@ export const api = {
   createQuote: (lineItems, { currency, reviseFrom } = {}) =>
     request('/api/quotes', { method: 'POST', body: JSON.stringify({ lineItems, currency, reviseFrom }) }),
   myQuotes: (scope) => request(`/api/my/quotes${scope === 'account' ? '?scope=account' : ''}`),
-  quoteAction: (id, action, reason) => request(`/api/quotes/${id}/${action}`, { method: 'POST', body: JSON.stringify({ reason }) }),
   getProfile: () => request('/api/profile'),
   saveProfile: (profile) => request('/api/profile', { method: 'PUT', body: JSON.stringify(profile) }),
   quoteAsCart: (id) => request(`/api/quotes/${id}/cart`),

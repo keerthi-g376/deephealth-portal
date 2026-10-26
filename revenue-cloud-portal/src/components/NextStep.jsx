@@ -22,19 +22,19 @@ export default function NextStep() {
     const s = quote.status;
     if (s === 'Draft') {
       step = 2;
-      text = dirty ? 'Your cart has changes. Click Update Quote to save them, then Submit for review from My Quotations.' : `Quote #${quote.quoteNumber} is a draft. Change it freely, then Submit for review from My Quotations.`;
+      text = dirty ? 'Your cart has changes. Open the cart and click Update Quote to save them.' : `Quote #${quote.quoteNumber} is a draft. Change the cart and click Update Quote to save changes.`;
     } else if (['Needs Review', 'In Review'].includes(s)) {
       step = 3;
       text = `Quote #${quote.quoteNumber} is with our team for pricing review. We will update its status here.`;
     } else if (['Approved', 'Presented'].includes(s)) {
       step = 4;
-      text = `Quote #${quote.quoteNumber} is approved. Accept it from My Quotations, or revise it if your needs changed.`;
+      text = `Quote #${quote.quoteNumber} is approved. Our team will contact you about the next step.`;
     } else if (s === 'Accepted') {
       step = 5;
       text = `Quote #${quote.quoteNumber} is accepted. Our team will process your order.`;
     } else {
       step = 3;
-      text = `Quote #${quote.quoteNumber} is ${s}. Open My Quotations to revise it or start a new one.`;
+      text = `Quote #${quote.quoteNumber} is ${s}. Open My Quotations to see its details.`;
     }
   }
 

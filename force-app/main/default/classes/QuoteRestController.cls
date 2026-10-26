@@ -665,7 +665,9 @@ global with sharing class QuoteRestController {
         List<Quote> quotes = [
             SELECT Id, QuoteNumber, Name, Status, Quote_Source__c, Description, GrandTotal, Subtotal,
                    Tax, ShippingHandling, TotalPrice, TotalPriceWithTax, Discount,
-                   CreatedDate, ExpirationDate, OpportunityId, CurrencyIsoCode
+                   CreatedDate, ExpirationDate, OpportunityId, CurrencyIsoCode, Contact.Name,
+                   BillingName, BillingStreet, BillingCity, BillingState, BillingPostalCode, BillingCountry,
+                   ShippingName, ShippingStreet, ShippingCity, ShippingState, ShippingPostalCode, ShippingCountry
             FROM Quote
             WHERE Id = :quoteId
             LIMIT 1
@@ -777,6 +779,9 @@ global with sharing class QuoteRestController {
         global String expirationDate;
         global String opportunityId;
         global String currencyCode;
+        global String ownerName;
+        global Map<String, String> billing;
+        global Map<String, String> shipping;
         global List<QuoteLineDTO> products;
 
         global QuoteDetailDTO(Quote q, List<QuoteLineItem> lines) {
@@ -796,7 +801,9 @@ global with sharing class QuoteRestController {
             this.createdDate       = q.CreatedDate.format('yyyy-MM-dd');
             this.expirationDate    = q.ExpirationDate != null ? String.valueOf(q.ExpirationDate) : null;
             this.opportunityId     = q.OpportunityId;
-
+            this.ownerName        = q.Contact.Name;
+            this.billing           = new Map<String, String>{ 'name' => q.BillingName, 'street' => q.BillingStreet, 'city' => q.BillingCity, 'state' => q.BillingState, 'postalCode' => q.BillingPostalCode, 'country' => q.BillingCountry };
+            this.shipping          = new Map<String, String>{ 'name' => q.ShippingName, 'street' => q.ShippingStreet, 'city' => q.ShippingCity, 'state' => q.ShippingState, 'postalCode' => q.ShippingPostalCode, 'country' => q.ShippingCountry };
             this.products = new List<QuoteLineDTO>();
             for (QuoteLineItem li : lines) {
                 this.products.add(new QuoteLineDTO(li));
