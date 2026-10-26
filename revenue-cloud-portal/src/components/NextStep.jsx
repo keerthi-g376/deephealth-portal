@@ -1,9 +1,9 @@
 import { useAuth } from '../auth.jsx';
 import { useCart } from '../cart.jsx';
 
-const STEPS = ['Sign in', 'Choose products', 'Create quote', 'Review', 'Accept'];
+const STEPS = ['Sign in', 'Choose products', 'Create quote'];
 
-// Tells the customer where they are and what to do next, from their sign-in state, cart and quote status.
+// Tells the customer where they are and what to do next, from their sign-in state, cart and quote.
 export default function NextStep() {
   const { user, ready } = useAuth();
   const { items, quote, dirty } = useCart();
@@ -19,23 +19,12 @@ export default function NextStep() {
     step = items.length ? 2 : 1;
     text = items.length ? `You have ${items.length} product${items.length === 1 ? '' : 's'} in the cart. Open the cart and click Create Quote.` : 'You are signed in. Add products to the cart to start your quotation.';
   } else if (user && quote) {
-    const s = quote.status;
-    if (s === 'Draft') {
-      step = 2;
-      text = dirty ? 'Your cart has changes. Open the cart and click Update Quote to save them.' : `Quote #${quote.quoteNumber} is a draft. Change the cart and click Update Quote to save changes.`;
-    } else if (['Needs Review', 'In Review'].includes(s)) {
-      step = 3;
-      text = `Quote #${quote.quoteNumber} is with our team for pricing review. We will update its status here.`;
-    } else if (['Approved', 'Presented'].includes(s)) {
-      step = 4;
-      text = `Quote #${quote.quoteNumber} is approved. Our team will contact you about the next step.`;
-    } else if (s === 'Accepted') {
-      step = 5;
-      text = `Quote #${quote.quoteNumber} is accepted. Our team will process your order.`;
-    } else {
-      step = 3;
-      text = `Quote #${quote.quoteNumber} is ${s}. Open My Quotations to see its details.`;
-    }
+    step = 3;
+    text = quote.status === 'Draft'
+      ? dirty
+        ? 'Your cart has changes. Open the cart and click Update Quote to save them.'
+        : `Quote #${quote.quoteNumber} is created. To change it, update the cart and click Update Quote, or open My Quotations to see its details.`
+      : `Quote #${quote.quoteNumber} is ${quote.status}. Open My Quotations to see its details.`;
   }
 
   return (

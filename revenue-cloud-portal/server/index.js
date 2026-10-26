@@ -494,28 +494,6 @@ app.get(
   }),
 );
 
-// Customer actions on a quote. Apex checks the owner and which status each action is allowed from:
-//   submit  Draft -> Needs Review (locks it for the pricing review)
-//   accept  Approved -> Accepted (the Opportunity becomes Closed Won)
-//   decline anything open -> Denied, with a reason (the Opportunity becomes Closed Lost)
-const ACTIONS = { submit: 'Needs Review', accept: 'Accepted', decline: 'Denied' };
-app.post(
-  '/api/quotes/:id/:action',
-  requireCustomer,
-  wrap(async (req, res) => {
-    const status = ACTIONS[req.params.action];
-    if (!status) throw new SfError('Unknown action', 404);
-    const id = quoteId(req);
-    const body = { status };
-    if (status === 'Denied') {
-      const existing = await callQuoteApi('GET', id, null, own(req));
-      const reason = text(req.body?.reason, 200) || 'no reason given';
-      body.notes = [existing.notes, `Customer not interested: ${reason}`].filter(Boolean).join('\n').slice(0, 2000);
-    }
-    res.json(await callQuoteApi('PATCH', id, body, own(req)));
-  }),
-);
-
 // Update the SAME quote: replaces its line items with the current cart. Only a Draft can be changed (Apex enforces it).
 app.patch(
   '/api/quotes/:id',
