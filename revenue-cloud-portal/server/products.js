@@ -392,3 +392,9 @@ export async function pricedCurrencies() {
   currencyCache = { at: Date.now(), list: Object.fromEntries(rows.map((r) => [r.CurrencyIsoCode, rates.get(r.CurrencyIsoCode) ?? 1])) };
   return currencyCache.list;
 }
+
+// Prices are shown only to signed-in customers: everything else gets 0 (and no attribute price rules).
+export const maskPrices = (data) => {
+  const hide = (p) => ({ ...p, unitPrice: 0, attributePricing: [] });
+  return { ...data, products: data.products.map(hide), componentProducts: (data.componentProducts ?? []).map(hide) };
+};

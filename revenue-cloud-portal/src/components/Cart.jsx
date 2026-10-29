@@ -55,7 +55,7 @@ function LineAttribute({ attr, value, onChange }) {
 // Everything inside the cart - used by both the pop-up (header Cart button) and the full "Your Cart" page.
 export function CartContent({ byId }) {
   const cart = useCart();
-  const { user } = useAuth();
+  const { user, openSignIn } = useAuth();
   const pending = !!user && user.access !== 'Active';
   const { items, quote, dirty, locked, saving } = cart;
   const [editing, setEditing] = useState(() => new Set()); // lines whose attributes are open for editing
@@ -107,7 +107,8 @@ export function CartContent({ byId }) {
   const canSave = !saving && !locked && !pending && (quote ? dirty : items.length > 0);
 
   let hint = '';
-  if (pending) hint = 'Your access is waiting for approval from your account owner, so you cannot create quotes yet.';
+  if (!user) hint = 'Prices are shown after you sign in.';
+  else if (pending) hint = 'Your access is waiting for approval from your account owner, so you cannot create quotes yet.';
   else if (locked) hint = `Quote ${quote.quoteNumber} is ${quote.status} and can no longer be changed.`;
   else if (quote && !dirty) hint = 'Cart matches the Salesforce quote.';
   else if (quote) hint = 'You have changes that are not in Salesforce yet.';
@@ -217,9 +218,15 @@ export function CartContent({ byId }) {
       {hint && <p className="hint">{hint}</p>}
 
       <div className="cart-actions">
-        <button className="btn-coral block" disabled={!canSave} onClick={cart.saveQuote}>
-          {label}
-        </button>
+        {user ? (
+          <button className="btn-coral block" disabled={!canSave} onClick={cart.saveQuote}>
+            {label}
+          </button>
+        ) : (
+          <button className="btn-coral block" onClick={openSignIn}>
+            Sign In to Create a Quote
+          </button>
+        )}
         {items.length > 0 && !locked && (
           <button className="btn-outline block" onClick={cart.clear} disabled={saving}>
             Clear cart

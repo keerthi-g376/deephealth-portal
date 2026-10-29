@@ -1,18 +1,14 @@
 import { useState } from 'react';
 import { api } from '../api.js';
 import { useAuth } from '../auth.jsx';
-import AddressFields, { emptyAddress } from './AddressFields.jsx';
 
 // Email -> emailed 6-digit code -> (first time only) registration details.
 // A colleague of a company that is already registered only gives their name and then waits for approval.
-// A new company gives company, billing and shipping address (shipping can be "same as billing").
+// A new company gives just its name (or registers as an individual); addresses can be added later in My Profile.
 export default function SignInModal({ countryCode }) {
   const { dialog, closeSignIn, setUser } = useAuth();
   const [step, setStep] = useState('email'); // email | code | profile
   const [f, setF] = useState({ email: '', code: '', firstName: '', lastName: '', phone: '', company: '', individual: false });
-  const [billing, setBilling] = useState(emptyAddress);
-  const [shipping, setShipping] = useState(emptyAddress);
-  const [sameAsBilling, setSameAsBilling] = useState(true);
   const [colleague, setColleague] = useState(null); // { accountName } when the email's company already exists
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -36,8 +32,6 @@ export default function SignInModal({ countryCode }) {
   const reset = () => {
     setStep('email');
     setF({ email: '', code: '', firstName: '', lastName: '', phone: '', company: '', individual: false });
-    setBilling(emptyAddress);
-    setShipping(emptyAddress);
     setColleague(null);
   };
 
@@ -50,8 +44,6 @@ export default function SignInModal({ countryCode }) {
       ...f,
       country: countryCode,
       joinExisting: !!colleague,
-      billing: colleague ? null : billing,
-      shipping: colleague ? null : sameAsBilling ? billing : shipping,
     });
     if (d.needsProfile) {
       setColleague(d.domainMatch ? { accountName: d.accountName } : null);
@@ -100,7 +92,7 @@ export default function SignInModal({ countryCode }) {
                   </button>
                 </>
               ) : (
-                <p className="note">Welcome! Tell us who you are. Your company and addresses are used on your quotes.</p>
+                <p className="note">Welcome! Tell us who you are to create your account.</p>
               )}
               <input className="field" placeholder="First name" value={f.firstName} onChange={set('firstName')} maxLength={40} />
               <input className="field" placeholder="Last name *" value={f.lastName} onChange={set('lastName')} maxLength={80} required />
@@ -112,12 +104,6 @@ export default function SignInModal({ countryCode }) {
                     <input type="checkbox" checked={f.individual} onChange={(e) => setF((x) => ({ ...x, individual: e.target.checked, company: '' }))} />
                     I don't have a company (register as an individual)
                   </label>
-                  <AddressFields label="Billing address" value={billing} onChange={setBilling} required />
-                  <label className="note" style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                    <input type="checkbox" checked={sameAsBilling} onChange={(e) => setSameAsBilling(e.target.checked)} />
-                    Shipping address is the same as billing
-                  </label>
-                  {!sameAsBilling && <AddressFields label="Shipping address" value={shipping} onChange={setShipping} required />}
                 </>
               )}
               {error && <p role="alert" style={{ color: 'var(--coral)', margin: 0 }}>{error}</p>}

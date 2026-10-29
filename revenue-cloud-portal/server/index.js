@@ -3,7 +3,7 @@ import express from 'express';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { SfError, authMode, callCustomerApi, callLeadApi, callQuoteApi, insertRecords, soql } from './salesforce.js';
-import { defaultCurrency, getProducts, pricedCurrencies } from './products.js';
+import { defaultCurrency, getProducts, maskPrices, pricedCurrencies } from './products.js';
 import { countries, countryByCode } from './countries.js';
 import crypto from 'node:crypto';
 import { codeIsValid, endSession, hitCounter, makeCode, rateLimit, readSession, startSession } from './guard.js';
@@ -218,7 +218,8 @@ app.get(
     // public mode serves the short-lived cache so visitors don't each trigger Salesforce queries
     const country = req.query.country ? countryByCode(req.query.country) : null;
     if (req.query.country && !country) throw new SfError('Unknown country', 400);
-    res.json({ ...(await getProducts({ fresh: !publicMode, ...(country ? { currency: country.currency } : {}) })), country });
+    const data = await getProducts({ fresh: !publicMode, ...(country ? { currency: country.currency } : {}) });
+    res.json({ ...(readSession(req, sessionSecret) ? data : maskPrices(data)), country }); // prices only for signed-in customers
   }),
 );
 
@@ -316,8 +317,6 @@ app.post(
       individual: b.individual === true,
       joinExisting: b.joinExisting === true,
       country: countryByCode(b.country)?.name ?? '',
-      billing: cleanAddress(b.billing),
-      shipping: cleanAddress(b.shipping),
     });
     if (customer.needsProfile) return res.json({ needsProfile: true, domainMatch: !!customer.domainMatch, accountName: customer.accountName ?? '' });
     startSession(req, res, sessionSecret, { contactId: customer.contactId, accountId: customer.accountId, name: customer.name || email, email });
@@ -515,7 +514,7 @@ app.post(
     ? rateLimit({ windowMs: 3_600_000, max: 40, message: 'You have reached the hourly limit for the assistant. Please try again later.' })
     : (_req, _res, next) => next(),
   wrap(async (req, res) => {
-    res.json(await askAssistant(req.body?.messages, req.body?.cart));
+    res.json(await askAssistant(req.body?.messages, req.body?.cart, { signedIn: !!readSession(req, sessionSecret) }));
   }),
 );
 

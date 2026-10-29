@@ -57,6 +57,20 @@ private class PortalCustomerServiceTest {
     }
 
     @IsTest
+    static void registrationNeedsNoAddress() {
+        PortalCustomerService.CustomerRequest r = req('simple@simpleco.com');
+        r.firstName = 'Sam';
+        r.lastName = 'Simple';
+        r.company = 'SimpleCo';
+        Map<String, Object> out = PortalCustomerService.resolve(r);
+        System.assertEquals(true, out.get('isAdmin'));
+        Account acc = [SELECT Name, BillingCity FROM Account WHERE Id = :(Id) out.get('accountId')];
+        System.assertEquals('SimpleCo', acc.Name);
+        System.assertEquals(null, acc.BillingCity);
+        System.assertEquals(1, [SELECT COUNT() FROM Contact WHERE Email = 'simple@simpleco.com']);
+    }
+
+    @IsTest
     static void individualGetsPlaceholderAccount() {
         PortalCustomerService.CustomerRequest r = fullProfile('solo@gmail.com', null);
         r.individual = true;

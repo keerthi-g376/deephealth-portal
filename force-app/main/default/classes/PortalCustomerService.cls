@@ -271,8 +271,8 @@ global with sharing class PortalCustomerService {
             return payload(firstId);
         }
 
-        // a new company: name, company (or "individual") and a billing address are required
-        Boolean complete = String.isNotBlank(req.lastName) && (String.isNotBlank(req.company) || req.individual == true) && hasAddress(req.billing);
+        // a new company: name and company (or "individual") are enough; addresses can be added later in My Profile
+        Boolean complete = String.isNotBlank(req.lastName) && (String.isNotBlank(req.company) || req.individual == true);
         if (!complete) return new Map<String, Object>{ 'needsProfile' => true, 'domainMatch' => false };
 
         Id newContactId;

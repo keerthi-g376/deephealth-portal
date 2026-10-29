@@ -1,6 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { SfError } from './salesforce.js';
-import { getProducts } from './products.js';
+import { getProducts, maskPrices } from './products.js';
 
 // The portal's AI shopping assistant. It answers from the same live Salesforce catalog the storefront
 // shows (products, prices, bundle components, attributes, attribute pricing, configurator rules) and
@@ -287,11 +287,13 @@ function extractActions(text, { products }) {
   return { text: clean, actions };
 }
 
-export async function askAssistant(rawMessages, cart) {
+export async function askAssistant(rawMessages, cart, { signedIn = false } = {}) {
   if (!chatEnabled()) throw new SfError('The assistant is not set up on this server.', 503);
   const messages = cleanMessages(rawMessages);
-  const data = await getProducts();
-  const catalog = catalogText(data);
+  const real = await getProducts();
+  const data = signedIn ? real : maskPrices(real);
+  const hidden = signedIn ? '' : 'IMPORTANT: the customer is not signed in, so every price in the catalog below is hidden (it shows as $0). Never state or estimate a price or a total; tell them prices appear after they sign in.';
+  const catalog = [hidden, catalogText(data)].filter(Boolean).join('\n\n');
   const cartInfo = cartText(cart);
 
   let answer;

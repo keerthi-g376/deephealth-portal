@@ -79,7 +79,7 @@ function useCountry() {
   return { countries, country, choose };
 }
 
-function useCatalog(countryCode) {
+function useCatalog(countryCode, signedIn) {
   const [state, setState] = useState({ status: 'loading', products: [], componentProducts: [], error: '' });
   const load = useCallback(() => {
     setState((s) => ({ ...s, status: 'loading', error: '' }));
@@ -90,7 +90,7 @@ function useCatalog(countryCode) {
         setState({ status: 'ready', products: d.products, componentProducts: d.componentProducts ?? [], error: '' });
       })
       .catch((e) => setState((s) => ({ ...s, status: 'error', error: e.message })));
-  }, [countryCode]);
+  }, [countryCode, signedIn]); // prices appear (or disappear) when the customer signs in (or out)
   useEffect(load, [load]);
   return { ...state, reload: load };
 }
@@ -304,6 +304,7 @@ function Storefront({ catalog, geo }) {
                     </option>
                   ))}
                 </Chip>
+                {auth.user && (
                 <Chip label="Filter by price range" value={priceRange} onChange={(v) => { setPriceRange(v); setPage(1); }}>
                   {PRICE_RANGES.map((r) => (
                     <option key={r.id} value={r.id}>
@@ -311,6 +312,7 @@ function Storefront({ catalog, geo }) {
                     </option>
                   ))}
                 </Chip>
+                )}
                 <Chip label="Sort products" value={sort} onChange={(v) => { setSort(v); setPage(1); }}>
                   {SORTS.map((x) => (
                     <option key={x.id} value={x.id}>
@@ -393,19 +395,26 @@ function Storefront({ catalog, geo }) {
   );
 }
 
-export default function App() {
+function Shell() {
+  const auth = useAuth();
   const geo = useCountry();
   // a loaded quotation is priced in its own currency: switch the storefront to a country that uses it
   geo.syncCurrency = (currency) => {
     const match = geo.countries.find((c) => c.currency === currency);
     if (match && match.currency !== geo.country?.currency) geo.choose(match.code);
   };
-  const catalog = useCatalog(geo.country?.code ?? '');
+  const catalog = useCatalog(geo.country?.code ?? '', !!auth.user);
+  return (
+    <CartProvider>
+      <Storefront catalog={catalog} geo={geo} />
+    </CartProvider>
+  );
+}
+
+export default function App() {
   return (
     <AuthProvider>
-      <CartProvider>
-        <Storefront catalog={catalog} geo={geo} />
-      </CartProvider>
+      <Shell />
     </AuthProvider>
   );
 }
