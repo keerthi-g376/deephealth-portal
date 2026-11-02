@@ -3,7 +3,7 @@
 # (the file, not the folder). rootDir makes Render build and run inside that folder.
 services:
   - type: web
-    name: deephealth-portal # becomes https://deephealth-portal.onrender.com (if the name is free)
+    name: caresphere-portal # becomes https://caresphere-portal.onrender.com (if the name is free)
     runtime: node
     plan: free
     rootDir: revenue-cloud-portal
