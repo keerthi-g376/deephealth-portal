@@ -14,27 +14,11 @@ import MyQuotes from './components/MyQuotes.jsx';
 import NextStep from './components/NextStep.jsx';
 import SignInModal from './components/SignInModal.jsx';
 import Toasts from './components/Toasts.jsx';
-import { moneyWhole, setDisplayCurrency } from './format.js';
+import { setDisplayCurrency } from './format.js';
 import { ArrowRightIcon, BellIcon, CartIcon, ChevronDownIcon, FilterIcon, SearchIcon } from './components/icons.jsx';
 
 const initialsOf = (name) => name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join('');
 
-// Price-range filter: the thresholds are $1,000 and $10,000 converted to the selected currency (rounded).
-function priceRanges(rate = 1, currency) {
-  const nice = (usd) => {
-    const v = usd * rate;
-    const step = v >= 50_000 ? 10_000 : v >= 5_000 ? 1_000 : 100;
-    return Math.max(step, Math.round(v / step) * step);
-  };
-  const lo = nice(1000);
-  const hi = nice(10000);
-  return [
-    { id: 'any', label: 'Price Range', test: () => true },
-    { id: 'lt1k', label: `Under ${moneyWhole(lo, currency)}`, test: (p) => p < lo },
-    { id: '1k-10k', label: `${moneyWhole(lo, currency)} – ${moneyWhole(hi, currency)}`, test: (p) => p >= lo && p <= hi },
-    { id: 'gt10k', label: `Over ${moneyWhole(hi, currency)}`, test: (p) => p > hi },
-  ];
-}
 const SORTS = [
   { id: 'default', label: 'Sort by', cmp: null },
   { id: 'name', label: 'Name (A–Z)', cmp: (a, b) => a.name.localeCompare(b.name) },
@@ -127,14 +111,12 @@ function Storefront({ catalog, geo }) {
   const { route, back } = useRoute();
   const [query, setQuery] = useState('');
   const [family, setFamily] = useState('All');
-  const [priceRange, setPriceRange] = useState('any');
   const [sort, setSort] = useState('default');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(PAGE_SIZES[0]);
   const [cartOpen, setCartOpen] = useState(false);
   const closeCart = useCallback(() => setCartOpen(false), []);
   const { products, componentProducts } = catalog;
-  const PRICE_RANGES = useMemo(() => priceRanges(geo.country?.rate ?? 1, geo.country?.currency ?? 'USD'), [geo.country]);
 
   // Every product that can be shown or quoted: the catalog plus bundle children outside it.
   const allProducts = useMemo(() => [...products, ...componentProducts], [products, componentProducts]);
@@ -154,26 +136,23 @@ function Storefront({ catalog, geo }) {
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
-    const inRange = PRICE_RANGES.find((r) => r.id === priceRange).test;
     const list = products.filter(
       (p) =>
         (family === 'All' || p.family === family) &&
-        (priceRange === 'any' || (p.unitPrice != null && inRange(p.unitPrice))) &&
         (!q || [p.name, p.code, p.family, p.description].some((v) => v?.toLowerCase().includes(q))),
     );
     const cmp = SORTS.find((x) => x.id === sort).cmp;
     return cmp ? [...list].sort(cmp) : list;
-  }, [products, query, family, priceRange, sort, PRICE_RANGES]);
+  }, [products, query, family, sort]);
 
   const pages = Math.max(1, Math.ceil(visible.length / pageSize));
   const currentPage = Math.min(page, pages);
   const from = (currentPage - 1) * pageSize;
   const pageItems = visible.slice(from, from + pageSize);
-  const activeFilters = (family !== 'All') + (priceRange !== 'any') + (sort !== 'default');
+  const activeFilters = (family !== 'All') + (sort !== 'default');
   const resetFilters = () => {
     setQuery('');
     setFamily('All');
-    setPriceRange('any');
     setSort('default');
     setPage(1);
   };
@@ -304,15 +283,6 @@ function Storefront({ catalog, geo }) {
                     </option>
                   ))}
                 </Chip>
-                {auth.user && (
-                <Chip label="Filter by price range" value={priceRange} onChange={(v) => { setPriceRange(v); setPage(1); }}>
-                  {PRICE_RANGES.map((r) => (
-                    <option key={r.id} value={r.id}>
-                      {r.label}
-                    </option>
-                  ))}
-                </Chip>
-                )}
                 <Chip label="Sort products" value={sort} onChange={(v) => { setSort(v); setPage(1); }}>
                   {SORTS.map((x) => (
                     <option key={x.id} value={x.id}>
