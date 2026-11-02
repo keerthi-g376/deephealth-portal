@@ -234,7 +234,7 @@ function normalize(p, picklists, currency, components, rulesByBundle, classifica
     code: p.ProductCode || '',
     family: p.Family || 'Other',
     description: p.Description || '',
-    image: p.DisplayUrl || null,
+    image: p.DisplayUrl?.replace(/^https?:\/\/[^/]+(?=\/products\/)/, '') || null, // /products/... is served by this app, whatever its address
     unitPrice: entry ? entry.UnitPrice : null, // null => no active price, cannot be quoted
     currency: entry?.CurrencyIsoCode || currency,
     isBundle: p.Type === 'Bundle',

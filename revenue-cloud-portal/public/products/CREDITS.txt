@@ -1,2 +1,30 @@
 Product images: photos from Unsplash (Unsplash License, no attribution required) plus public-domain / CC0 medical images from Wikimedia Commons (mammograms, MRI, chest CT).
 No faces and no brand names or logos. Replace with your own photography when available.
+
+Additional images (Wikimedia Commons, public domain / CC0):
+
+
+Additional images (Wikimedia Commons, public domain / CC0):
+
+
+Additional images (Wikimedia Commons, public domain / CC0):
+brain-mri.jpg: File:MRI Brain T1 Axial (2).jpg (CC BY-SA 4.0) by 511KeV
+mammography-unit.jpg: File:USMC-090518-M-8355A-001.jpg (Public domain) by 
+chest-ct.jpg: File:CT-Thorax-5.0-B70f-Lungs.jpg (CC BY-SA 4.0) by Ptrump16
+hospital-corridor.jpg: File:HK 屯門醫院 Tuen Mun Hospital ground floor corridor interior July 2016 DSC.jpg (CC BY-SA 4.0) by YipshaiukOWL
+pacs-workstation.jpg: File:CT Brain Scan.jpg (CC BY 4.0) by Goleisureintl
+radiology-monitor.jpg: File:Obstetric ultrasound scan monitor showing 20-week human fetus profile in Navi Mumbai 2015.jpg (CC BY 4.0) by Goleisureintl
+medical-records.jpg: File:Costar CSK-7102N board.jpeg (Public domain) by zts
+network-cables.jpg: File:19-inch rackmount Ethernet switches and patch panels.jpg (CC BY-SA 4.0) by Dsimic
+lung-nodule-ct.jpg: File:Solitary pulmonary nodule CT arrow.jpg (CC BY 2.0) by Lourens Willekes, Cherif Boutros and Michael A. Goldfarb
+bac-mammogram.jpg: File:Calcium Oxalate in Fibrocystic Breast (5372925144).jpg (CC BY 2.0) by Ed Uthman from Houston, TX, USA
+breast-mri.jpg: File:Mri of breast cancer.jpg (Public domain) by Unknown photographer
+lung-hrct.jpg: File:HRCT Chest Lung Imaging.jpg (CC BY 4.0) by 
+
+ct-scanner.jpg: File:Model positioned in computed tomography scanner.jpg (Public domain) Daniel Sone (Photographer)
+radiology-films.jpg: File:New War Opens on Factory Front- X-ray Screening For Tuberculosis, London, England, 1943 D13177.jpg (Public domain) 
+Ministry of Information Photo Division Photographer
+breast-ultrasound.jpg: File:Ultrasound image of breast 110323101432 1023480.jpg (CC BY-SA 3.0) Nevit Dilmen (talk)
+
+pacs-monitor.jpg: File:Tube-monitor hg.jpg (CC BY-SA 4.0) Hannes Grobe
+bac-mammography.jpg: File:Mammography phantom.jpg (CC BY-SA 4.0) Cerevisae
