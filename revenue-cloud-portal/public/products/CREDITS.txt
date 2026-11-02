@@ -28,3 +28,11 @@ breast-ultrasound.jpg: File:Ultrasound image of breast 110323101432 1023480.jpg 
 
 pacs-monitor.jpg: File:Tube-monitor hg.jpg (CC BY-SA 4.0) Hannes Grobe
 bac-mammography.jpg: File:Mammography phantom.jpg (CC BY-SA 4.0) Cerevisae
+
+smartmammo-usage.jpg: Mammogram (abnormal).jpg (Public domain)
+bac-calcifications.jpg: Calcificaciones en pop-corn CC 02.JPG (CC BY-SA 4.0)
+hdd-storage.jpg: Seagate BarraCuda Compute 2TB 3.5-inch SATA HDD - top view.jpg (CC BY-SA 4.0)
+
+mri-scanner.jpg: HITACHI, Magnetic Resonance Imaging System, ECHELON OVAL,.jpg (CC BY-SA 3.0)
+
+ct-room.jpg: Ct-scan.jpg (Public domain)
